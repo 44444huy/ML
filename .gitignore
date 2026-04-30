@@ -12,10 +12,16 @@ venv/
 .venv/
 env/
 
-# Data artifacts (sinh lại được từ raw)
-data/processed/
-experiments/*/checkpoints/
-experiments/*/logs/
+# Part A (human) — data artifacts (regenerable from raw)
+human/data/processed/
+human/experiments/*/checkpoints/
+human/experiments/*/logs/
+
+# Part B (dog) — raw genotype + processed bundles
+dog/data/raw/
+dog/data/processed/
+dog/experiments/*/checkpoints/
+dog/experiments/*/logs/
 
 # Editor / OS
 .vscode/

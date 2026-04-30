@@ -20,7 +20,7 @@ sns.set_theme(style="whitegrid", context="notebook")
 
 def fig_label_distribution(data: dict) -> None:
     """Bar chart of class counts per trait (hard labels)."""
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))   # 1 row, 3 graphs for eye/hair/skin, figsize in inches
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
     for ax, trait in zip(axes, ["eye", "hair", "skin"]):
         y = data[f"y_{trait}"]
         names = TRAIT_NAMES[trait]
@@ -38,7 +38,7 @@ def fig_label_distribution(data: dict) -> None:
 
 def fig_confidence_histograms(data: dict) -> None:
     """Histogram of max p_value per trait — confidence distribution."""
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))   # 1 row, 3 graphs for eye/hair/skin, figsize in inches
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
     for ax, trait in zip(axes, ["eye", "hair", "skin"]):
         conf = data[f"conf_{trait}"]
         ax.hist(conf, bins=40, color="steelblue", edgecolor="white")

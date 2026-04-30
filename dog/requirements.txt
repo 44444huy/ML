@@ -1,0 +1,8 @@
+# Part B (dog) — extra deps beyond Part A
+# Reuses numpy, pandas, sklearn, matplotlib, seaborn, torch, shap from human/
+
+# Read PLINK .bed/.bim/.fam files efficiently (memory-mapped, selective)
+pysnptools>=0.5.0
+
+# Optional: gradient boosting baseline for tabular SNP data
+xgboost>=2.0.0

@@ -1,96 +1,77 @@
-# EVC Dataset 
+# FDP-EVC — Externally Visible Characteristics from DNA
 
-## Overview
+A two-part student project on predicting visible traits (eye, hair, skin /
+coat colour) from genotype data.
 
-This EVC-FDP dataset includes:
+```
+FDP-EVC/
+├── human/   ← Part A: HIrisPlex-style pipeline on humans (silver labels)
+└── dog/     ← Part B: same problem on dogs, with real ground-truth labels
+```
 
-1. `hirisplex_results_FN_v2.csv` (source data in HiRISPlex-style output format)
-2. `full_dataset.csv` (ML-ready dataset: SNP features + labels)
+## Part A — Humans (silver labels)
 
----
+**Status: complete.**
 
-## 1) Source dataset: `hirisplex_results_FN_v2.csv`
+Dataset: 2,481 individuals, 41 HIrisPlex SNPs, labels obtained by running
+the published HIrisPlex-S logistic-regression model. Because the labels
+are produced by another model rather than observed directly, they are
+*silver*, not ground truth.
 
-- Shape: **(2504, 45)**
-- Contains **23 samples with missing `input_csv`**
+Part A:
+1. Establishes a clean baseline (LR / SVM / RF) with persistent splits
+   and a unified metric suite.
+2. Exposes five structural problems that come from training on
+   argmax(silver label):
+   - Eye `intermediate` class is wiped out by argmax.
+   - Many low-confidence samples become noisy hard labels.
+   - Severe class imbalance (red hair, very-dark skin).
+   - Hair / skin are ordinal but treated as categorical.
+   - Three traits trained independently, ignoring biological
+     correlation.
+3. Proposes **soft-label KL distillation** (M2) as a first fix and shows
+   it beats every baseline on skin (macro-F1 0.774 vs 0.652, MAE 0.022
+   vs ~0.11).
 
-### Key structure
+See `human/report/` for the full write-up.
 
-- `sample`: sample identifier
-- `input_csv`: a 2-line CSV string stored in one cell
-  - line 1: SNP names
-  - line 2: SNP dosage values (typically 0/1/2), total 41 SNPs
-- Trait result groups for `i = 0..13`:
-  - `result/i/trait`
-  - `result/i/p_value`
-  - `result/i/auc_loss`
-- `error`: optional error information (often empty)
+## Part B — Dogs (ground-truth labels)
 
-### Trait index groups
+**Status: in progress.**
 
-- Eye: `result/0..2/*`  
-  (blue eye, intermediate eye, brown eye)
-- Hair: `result/3..8/*`  
-  (blond hair, brown hair, red hair, black hair, light hair, dark hair)
-- Skin: `result/9..13/*`  
-  (very pale skin, pale skin, intermediate skin, dark skin, dark to black skin)
+The fundamental limit of Part A is the silver label itself. Part B
+side-steps it by using two dog datasets where phenotype is observed
+directly, not predicted by another model:
 
----
+1. **Coat colour** — Darwin's Ark (~3,277 dogs, multi-label). Owner
+   self-reports through a structured survey (Q243). Implemented first.
+2. **Eye colour** — Deane-Coe et al. (~2,769 dogs, blue vs brown,
+   3.9 % positive). Phenotype from owner-uploaded photos verified by
+   commercial DNA-testing staff. Rare-event problem, implemented
+   second.
 
-## 2) Training dataset: `full_dataset.csv`
+See `dog/README.md` for the Part B status and layout.
 
-- Shape: **(2481, 44)**
-- Built from samples with valid `input_csv`
+## Why two parts
 
-### Column structure
+Part A and Part B are both legitimate exercises but they answer
+different questions:
 
-- Feature columns: `snp_0` ... `snp_40` (41 SNP features)
-- Label columns:
-  - `eye` (0..2)
-  - `hair` (0..5)
-  - `skin` (0..4)
+| | Part A (human) | Part B (dog) |
+|---|---|---|
+| Label source | HIrisPlex-S model output | Owner survey / photo |
+| Label type | Silver | Ground truth (with noise) |
+| Question | What goes wrong on silver labels? | What's possible with real labels? |
 
-### Label assignment in EVC
+The narrative for the final defense is "Part A shows the ceiling
+imposed by silver labels; Part B shows what changes when the ceiling
+is removed".
 
-Selected label = the label with the highest `p-value` within each corresponding trait group (Eye/Hair/Skin).
+## Repository conventions
 
-Labels are assigned using `argmax` on grouped `p_value` fields:
-
-- `eye = argmax(probs[:, 0:3])`
-- `hair = argmax(probs[:, 3:9])`
-- `skin = argmax(probs[:, 9:14])`
-
----
-
-## 3) Confidence analysis (threshold)
-
-Goal: assess how confident argmax-selected labels are.
-
-- `selected p-value` = max probability in each task group
-- low-confidence at threshold 0.6: `selected_p < 0.6`
-
-### Low-confidence results at threshold = 0.6
-
-- Eye: **1518** samples (**61.19%**)
-- Hair: **145** samples (**5.84%**)
-- Skin: **309** samples (**12.45%**)
-
----
-
-## 4) Visualizations
-
-### Low-confidence by task (threshold = 0.6)
-
-![Low-confidence bar chart](assets/low_confidence_bar_threshold_0_6.png)
-
-### Histogram of selected p-values by task
-
-![Selected p-value histograms](assets/selected_pvalue_hist_threshold_0_6.png)
-
----
-
-## 5) Notes
-
-1. `input_csv` contains embedded newlines inside quoted text, so always use a robust CSV parser (e.g., pandas).
-2. `p_value` is used as confidence when assigning labels with `argmax`.
-3. Higher thresholds (e.g., 0.75+) increase confidence but reduce coverage.
+- Each part is self-contained — no cross-imports between `human/` and
+  `dog/`.
+- Persistent splits with seed 42 inside each part.
+- Raw data is gitignored; processed bundles are gitignored.
+- Each part has its own `README.md` and (for `dog/`) its own
+  `CLAUDE.md` with rules for AI-assisted development.

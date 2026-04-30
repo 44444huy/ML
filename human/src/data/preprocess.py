@@ -35,7 +35,7 @@ def parse_snp_vector(cell: str) -> np.ndarray:
 def load_raw(csv_path: str | Path) -> pd.DataFrame:
     """Load raw HIrisPlex output, drop samples missing input_csv."""
     df = pd.read_csv(csv_path)
-    df = df.dropna(subset=["input_csv"]).reset_index(drop=True) # Drop samples with missing SNP data, only on col "input_csv"
+    df = df.dropna(subset=["input_csv"]).reset_index(drop=True)
     return df
 
 
@@ -67,7 +67,7 @@ def build_dataset(csv_path: str | Path) -> dict:
         "p_eye": p_eye,
         "p_hair": p_hair,
         "p_skin": p_skin,
-        "y_eye": p_eye.argmax(axis=1).astype(np.int64),         # axis = 0: vertical, axis = 1: horizontal
+        "y_eye": p_eye.argmax(axis=1).astype(np.int64),
         "y_hair": p_hair.argmax(axis=1).astype(np.int64),
         "y_skin": p_skin.argmax(axis=1).astype(np.int64),
         "conf_eye": p_eye.max(axis=1),
