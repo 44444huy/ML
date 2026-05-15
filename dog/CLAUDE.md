@@ -37,8 +37,11 @@ DNA, validated on dog datasets where the labels are real ground truth
 
 ## Proposed method (eye, current)
 
-1. **GWAS-informed feature selection** — keep top-K SNPs by published
-   p_wald (default K=200).
+1. **GWAS-informed feature selection** — keep SNPs with `p_wald < 1.15e-7`
+   (Bonferroni cutoff used by Deane-Coe et al. 2018 on this same
+   dataset: 0.05 / ~430k markers). Yields ~60 SNPs, almost all on chr18
+   in the ALX4 region. The `--top_k` flag is kept for legacy /
+   sensitivity analysis only.
 2. **MLP with class-weighted BCE** — `pos_weight = n_neg / n_pos` to
    handle the 4 % positive rate.
 3. **PR-AUC + ROC-AUC + F1** as metrics (accuracy is meaningless at

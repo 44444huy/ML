@@ -3,6 +3,8 @@
 Reads:
     experiments/eye/baseline_results.json   (Majority, LR, RF)
     experiments/eye/mlp_results.json        (MLP + BCE + pos_weight)
+    experiments/eye/tabpfn_results.json     (TabPFN, optional)
+    experiments/eye/tabnet_results.json     (TabNet,  optional)
 
 Writes:
     report/eye.md
@@ -39,6 +41,13 @@ def load_all() -> dict:
     base = json.loads((EXP_DIR / "baseline_results.json").read_text())
     out: dict = {**base}
     out["MLP"] = json.loads((EXP_DIR / "mlp_results.json").read_text())
+    # Optional: deep-learning tabular models (only if their JSON exists)
+    tabpfn_path = EXP_DIR / "tabpfn_results.json"
+    if tabpfn_path.exists():
+        out["TabPFN"] = json.loads(tabpfn_path.read_text())
+    tabnet_path = EXP_DIR / "tabnet_results.json"
+    if tabnet_path.exists():
+        out["TabNet"] = json.loads(tabnet_path.read_text())
     return out
 
 
@@ -92,29 +101,115 @@ def plot_metric_bars(all_res: dict) -> None:
     plt.close(fig)
 
 
-def plot_pr_curves(X: np.ndarray, y: np.ndarray, splits: dict, device) -> None:
-    """Train MLP once on full trainval and plot the test PR curve."""
-    fig, ax = plt.subplots(figsize=(7, 5))
+def _probs_lr(X_tv, y_tv, X_te):
+    from sklearn.linear_model import LogisticRegression
+    m = LogisticRegression(max_iter=2000, class_weight="balanced",
+                           random_state=SEED, solver="liblinear")
+    m.fit(X_tv, y_tv)
+    return m.predict_proba(X_te)[:, 1]
+
+
+def _probs_rf(X_tv, y_tv, X_te):
+    from sklearn.ensemble import RandomForestClassifier
+    m = RandomForestClassifier(n_estimators=500, class_weight="balanced_subsample",
+                               n_jobs=-1, random_state=SEED)
+    m.fit(X_tv, y_tv)
+    return m.predict_proba(X_te)[:, 1]
+
+
+def _probs_mlp(X_tv, y_tv, idx_tr, idx_va, X_te, device):
+    model = train_one(X_tv[idx_tr], y_tv[idx_tr],
+                      X_tv[idx_va], y_tv[idx_va], device)
+    model.eval()
+    with torch.no_grad():
+        prob = torch.sigmoid(
+            model(torch.tensor(X_te, dtype=torch.float32, device=device))
+        ).cpu().numpy()
+    return prob
+
+
+def _probs_tabpfn(X_tv, y_tv, X_te, device):
+    import os
+    os.environ.setdefault("TABPFN_ALLOW_CPU_LARGE_DATASET", "1")
+    from tabpfn import TabPFNClassifier
+    clf = TabPFNClassifier(device=str(device), random_state=SEED,
+                           ignore_pretraining_limits=True)
+    clf.fit(X_tv, y_tv)
+    return clf.predict_proba(X_te)[:, 1]
+
+
+def _probs_tabnet(X_tv, y_tv, idx_tr, idx_va, X_te, device):
+    from pytorch_tabnet.tab_model import TabNetClassifier
+    n_pos = int(y_tv[idx_tr].sum())
+    n_neg = len(idx_tr) - n_pos
+    clf = TabNetClassifier(
+        n_d=16, n_a=16, n_steps=3, gamma=1.5, lambda_sparse=1e-4,
+        optimizer_fn=torch.optim.Adam, optimizer_params=dict(lr=2e-2),
+        seed=SEED, device_name=str(device), verbose=0,
+    )
+    clf.fit(
+        X_train=X_tv[idx_tr], y_train=y_tv[idx_tr],
+        eval_set=[(X_tv[idx_va], y_tv[idx_va])], eval_metric=["auc"],
+        max_epochs=200, patience=25, batch_size=256, virtual_batch_size=64,
+        weights={0: 1.0, 1: float(n_neg) / max(n_pos, 1)},
+    )
+    return clf.predict_proba(X_te)[:, 1]
+
+
+def plot_pr_curves(X: np.ndarray, y: np.ndarray, splits: dict, device,
+                   include_deep: bool = True) -> None:
+    """Plot test PR curves for every model in the comparison."""
+    fig, ax = plt.subplots(figsize=(7.5, 5.5))
     tv, te = splits["trainval"], splits["test"]
     X_tv, X_te = standardize(X[tv], X[te])
+    y_tv = y[tv]
+    y_te = y[te]
 
     rng = np.random.default_rng(SEED)
     perm = rng.permutation(len(tv))
     cut = int(0.9 * len(tv))
     idx_tr, idx_va = perm[:cut], perm[cut:]
 
-    model = train_one(X_tv[idx_tr], y[tv][idx_tr],
-                      X_tv[idx_va], y[tv][idx_va], device)
-    model.eval()
-    with torch.no_grad():
-        prob = torch.sigmoid(model(torch.tensor(X_te, dtype=torch.float32, device=device))).cpu().numpy()
-    p, r, _ = precision_recall_curve(y[te], prob)
-    ax.plot(r, p, label="MLP", color="tab:blue", lw=2)
+    curves: list[tuple[str, np.ndarray, str, str]] = []
 
+    print("[plot] LR ...")
+    curves.append(("LR", _probs_lr(X_tv, y_tv, X_te), "tab:gray", "--"))
+
+    print("[plot] RF ...")
+    curves.append(("RF", _probs_rf(X_tv, y_tv, X_te), "tab:olive", "--"))
+
+    print("[plot] MLP ...")
+    curves.append(("MLP", _probs_mlp(X_tv, y_tv, idx_tr, idx_va, X_te, device),
+                   "tab:blue", "-"))
+
+    if include_deep:
+        try:
+            print("[plot] TabPFN ...")
+            curves.append(("TabPFN", _probs_tabpfn(X_tv, y_tv, X_te, device),
+                           "tab:red", "-"))
+        except Exception as e:
+            print(f"[plot] skipping TabPFN: {e}")
+        try:
+            print("[plot] TabNet ...")
+            curves.append(("TabNet", _probs_tabnet(X_tv, y_tv, idx_tr, idx_va,
+                                                   X_te, device),
+                           "tab:green", "-"))
+        except Exception as e:
+            print(f"[plot] skipping TabNet: {e}")
+
+    from sklearn.metrics import average_precision_score
+    for name, prob, color, ls in curves:
+        p, r, _ = precision_recall_curve(y_te, prob)
+        ap = average_precision_score(y_te, prob)
+        ax.plot(r, p, label=f"{name} (AP={ap:.3f})", color=color,
+                linestyle=ls, lw=2)
+
+    ax.axhline(y_te.mean(), color="black", lw=1, ls=":",
+               label=f"baseline = {y_te.mean():.3f}")
     ax.set_xlabel("recall")
     ax.set_ylabel("precision")
-    ax.set_title("Test precision–recall curve (eye-color, MLP)")
-    ax.legend()
+    ax.set_title("Test precision–recall curves (eye-color)")
+    ax.legend(loc="lower left", fontsize=9)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1.05)
     ax.grid(alpha=0.3)
@@ -153,12 +248,15 @@ def main() -> int:
         "",
         "## Proposed method",
         "",
-        f"1. **GWAS-informed feature selection.** Sort all SNPs by their "
-        f"published GWAS p-value and keep the top "
-        f"{int(bundle['top_k'])}. The strongest signal is at "
-        f"chr18:44,924,848 (p=1.3e-68) — the ALX4 locus the original "
-        f"paper identified as the cause of blue eyes in dogs. So our "
-        f"top-200 list contains the real biological signal.",
+        f"1. **GWAS-informed feature selection.** Keep only SNPs that pass "
+        f"the Bonferroni cutoff used by Deane-Coe et al. 2018 on this "
+        f"same dataset, `p_wald < 1.15e-7` (= 0.05 / ~430k QC-passed "
+        f"markers). On this dataset that gives **{bundle['X'].shape[1]} "
+        f"SNPs**, almost all on chr18 in the ALX4 region the original "
+        f"paper identified as the cause of blue eyes. Re-using the "
+        f"reference paper's exact threshold is more defensible than "
+        f"picking K by hand and is appropriate here because the trait "
+        f"is oligogenic (one dominant locus, p ≈ 1.3e-68).",
         "2. **MLP with class-weighted BCE.** A 2-layer MLP "
         f"(hidden={HP.hidden}, dropout={HP.dropout}) trained with "
         "`BCEWithLogitsLoss(pos_weight = n_neg / n_pos)`. The "
@@ -167,10 +265,16 @@ def main() -> int:
         "3. **PR-AUC for evaluation, not accuracy.** PR-AUC is the "
         "standard metric for rare-event tasks: it directly measures "
         "how well the model ranks positives above negatives.",
-        "4. **Compare against three baselines** to confirm the MLP "
-        "actually helps: a Majority predictor, Logistic Regression "
-        "(class_weight=balanced), and Random Forest (n=500, "
-        "balanced_subsample).",
+        "4. **Compare against five other methods**:",
+        "   - **Majority** baseline (always predicts brown).",
+        "   - **Logistic Regression** with `class_weight=balanced`.",
+        "   - **Random Forest** (n=500, `balanced_subsample`).",
+        "   - **TabPFN** (Hollmann et al. 2023): a pre-trained "
+        "Transformer that does in-context learning on small tabular "
+        "tasks — no gradient updates on our data.",
+        "   - **TabNet** (Arik & Pfister 2021): an attention-based "
+        "tabular model that learns which SNPs to focus on at each "
+        "decision step.",
         "",
         f"Hyperparameters (fixed): Adam lr={HP.lr}, weight_decay="
         f"{HP.weight_decay}, batch_size={HP.batch_size}, early "
@@ -200,9 +304,13 @@ def main() -> int:
         "MLP would learn to predict the majority class. The weight "
         "(~24× for the positive class) keeps gradients on rare "
         "positives meaningful.",
-        "- GWAS-informed feature selection is what makes a 2,769-dog "
-        "dataset tractable for a neural network: 200 SNPs containing "
-        "the real signal beats 213,245 SNPs of mostly noise.",
+        "- GWAS-informed feature selection (`p < 1.15e-7`, Deane-Coe "
+        "Bonferroni) is what makes this 2,769-dog dataset tractable: "
+        "56 statistically significant SNPs beat throwing 213,245 noisy "
+        "SNPs at the model.",
+        "- Among the deep tabular methods, TabPFN and TabNet provide a "
+        "useful sanity check on the MLP — see the Test results table "
+        "for the head-to-head comparison.",
         "",
         "## Figures",
         "",

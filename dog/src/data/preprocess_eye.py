@@ -15,11 +15,18 @@ Pipeline:
        snp_chrom, snp_pos, p_wald.
 
 Usage:
-    python dog/src/data/preprocess_eye.py --top_k 200
+    python dog/src/data/preprocess_eye.py                # default p < 1.15e-7
+    python dog/src/data/preprocess_eye.py --p 1e-5       # suggestive
+    python dog/src/data/preprocess_eye.py --top_k 200    # legacy top-K mode
 
-The default top_k=200 is conservative — Deane-Coe report a single dominant
-locus on CFA18, so even K=50 would likely suffice. We keep K configurable
-so the downstream modelling can compare K=50, K=200, K=1000.
+Why p < 1.15e-7 instead of an arbitrary top-K?
+    1.15e-7 is the Bonferroni-corrected genome-wide threshold used in
+    the original Deane-Coe et al. 2018 paper on THIS dataset
+    (0.05 / ~430k markers after QC). Using the exact threshold from the
+    reference paper is more defensible than picking K by hand. It is
+    also appropriate here because the trait is oligogenic — Deane-Coe
+    et al. show one dominant locus on chr18/ALX4 (p ~ 1.3e-68), so a
+    small, statistically significant SNP set is sufficient.
 """
 from __future__ import annotations
 
@@ -62,15 +69,32 @@ def load_phenotype() -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-def select_top_snps(top_k: int) -> pd.DataFrame:
-    """Sort GWAS results by p_wald, drop NaN, return top-K rows."""
+def select_snps(p_threshold: float | None, top_k: int | None) -> pd.DataFrame:
+    """Select SNPs by GWAS p_wald.
+
+    Two modes:
+      - p_threshold (default): keep SNPs with p_wald < threshold.
+        Recommended: 1.15e-7 (Bonferroni cutoff used by Deane-Coe
+        et al. 2018 on this dataset).
+      - top_k (legacy): keep the K smallest-p_wald SNPs regardless of
+        statistical significance.
+    """
     df = pd.read_csv(ASSOC_PATH, sep=r"\s+")
     print(f"[gwas] total SNPs in assoc file: {len(df)}")
-    df = df.dropna(subset=["p_wald"])
-    df = df.sort_values("p_wald").head(top_k).reset_index(drop=True)
-    print(f"[gwas] kept top {len(df)} SNPs")
+    df = df.dropna(subset=["p_wald"]).sort_values("p_wald").reset_index(drop=True)
+
+    if top_k is not None:
+        df = df.head(top_k).reset_index(drop=True)
+        print(f"[gwas] mode = top_k ({top_k})")
+    else:
+        df = df[df["p_wald"] < p_threshold].reset_index(drop=True)
+        print(f"[gwas] mode = p_wald < {p_threshold:.0e}")
+
+    print(f"[gwas] kept {len(df)} SNPs")
     print(f"[gwas] best p_wald = {df['p_wald'].iloc[0]:.2e} on chr{df['chr'].iloc[0]}:{df['ps'].iloc[0]}")
-    print(f"[gwas] worst p_wald in top-K = {df['p_wald'].iloc[-1]:.2e}")
+    print(f"[gwas] worst p_wald kept = {df['p_wald'].iloc[-1]:.2e}")
+    chr_counts = df['chr'].value_counts().sort_index().to_dict()
+    print(f"[gwas] chromosome distribution: {chr_counts}")
     return df
 
 
@@ -121,18 +145,24 @@ def extract_genotypes(snp_df: pd.DataFrame, dog_ids_keep: list[str]) -> tuple[np
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--top_k", type=int, default=200,
-                        help="Top-K SNPs by GWAS p_wald (default 200)")
+    parser.add_argument("--p", dest="p_threshold", type=float, default=1.15e-7,
+                        help="Keep SNPs with p_wald < this "
+                             "(default 1.15e-7 = Bonferroni in Deane-Coe 2018)")
+    parser.add_argument("--top_k", type=int, default=None,
+                        help="Legacy: instead of --p, keep the top-K SNPs by p_wald")
     args = parser.parse_args()
 
-    print(f"=== preprocess_eye.py (top_k={args.top_k}) ===\n")
+    if args.top_k is not None:
+        print(f"=== preprocess_eye.py (top_k={args.top_k}) ===\n")
+    else:
+        print(f"=== preprocess_eye.py (p_wald < {args.p_threshold:.0e}) ===\n")
 
     # 1. Phenotype
     pheno = load_phenotype()
     print()
 
-    # 2. GWAS top SNPs
-    snp_df = select_top_snps(args.top_k)
+    # 2. GWAS SNP selection
+    snp_df = select_snps(args.p_threshold, args.top_k)
     print()
 
     # 3. Genotype extraction
@@ -168,7 +198,10 @@ def main() -> int:
         snp_chrom=snp_chrom,
         snp_pos=snp_pos,
         p_wald=p_wald,
-        top_k=np.asarray(args.top_k),
+        selection_mode=np.asarray(
+            f"top_k={args.top_k}" if args.top_k is not None
+            else f"p_wald<{args.p_threshold:.0e}"
+        ),
     )
     print(f"\n[final] saved {OUT_PATH}")
     return 0

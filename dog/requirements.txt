@@ -1,8 +1,12 @@
-# Part B (dog) — extra deps beyond Part A
-# Reuses numpy, pandas, sklearn, matplotlib, seaborn, torch, shap from human/
-
-# Read PLINK .bed/.bim/.fam files efficiently (memory-mapped, selective)
+numpy>=1.24
+pandas>=2.0
+scikit-learn>=1.3
+matplotlib>=3.7
+seaborn>=0.12
+torch>=2.0
 pysnptools>=0.5.0
-
-# Optional: gradient boosting baseline for tabular SNP data
-xgboost>=2.0.0
+# Pinned: tabpfn 7.x requires browser-based license auth which doesn't
+# work headless. 2.0.9 is the last version that just downloads the
+# pretrained weights without an API token.
+tabpfn==2.0.9
+pytorch-tabnet>=4.1
