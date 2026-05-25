@@ -60,3 +60,5 @@ def aggregate_folds(fold_results: list[dict]) -> dict:
         vals = np.asarray([r[k] for r in fold_results], dtype=float)
         out[k] = {"mean": float(np.nanmean(vals)), "std": float(np.nanstd(vals))}
     return out
+
+

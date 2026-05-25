@@ -49,7 +49,7 @@ Hyperparameters (fixed): Adam lr=0.001, weight_decay=0.0001, batch_size=64, earl
 - The Majority baseline scores PR-AUC=0.04, confirming that accuracy on this dataset would be misleading.
 - The MLP beats Logistic Regression and Random Forest on PR-AUC and F1 — the proposed method works.
 - Class-weighted BCE is essential: without `pos_weight`, the MLP would learn to predict the majority class. The weight (~24× for the positive class) keeps gradients on rare positives meaningful.
-- GWAS-informed feature selection (`p < 5e-8`) is what makes this 2,769-dog dataset tractable: ~52 statistically significant SNPs beat throwing 213,245 noisy SNPs at the model.
+- GWAS-informed feature selection (`p < 1.15e-7`, Deane-Coe Bonferroni) is what makes this 2,769-dog dataset tractable: 56 statistically significant SNPs beat throwing 213,245 noisy SNPs at the model.
 - Among the deep tabular methods, TabPFN and TabNet provide a useful sanity check on the MLP — see the Test results table for the head-to-head comparison.
 
 ## Figures
