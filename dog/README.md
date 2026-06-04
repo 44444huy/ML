@@ -16,6 +16,7 @@ Test set (K = 56 SNP, ngưỡng `p_wald < 1.15×10⁻⁷` — Bonferroni Deane-C
 | Random Forest | 0.605 | 0.873 | 0.595 |
 | **MLP (đề xuất)** | **0.667** | **0.921** | **0.667** |
 | TabPFN (Hollmann 2023) | 0.600 | 0.807 | 0.700 |
+| TabICL (Qu 2025) | 0.683 | 0.882 | 0.744 |
 | TabNet (Arik & Pfister 2021) | 0.554 | 0.874 | 0.577 |
 
 ---
@@ -75,7 +76,10 @@ python dog/src/train/train_eye.py
 # 4b. (Tuỳ chọn) Train TabPFN — pretrained Transformer in-context learning
 python dog/src/train/train_tabpfn.py
 
-# 4c. (Tuỳ chọn) Train TabNet — attention-based tabular model
+# 4c. (Tuỳ chọn) Train TabICL — tabular foundation model in-context learning
+python dog/src/train/train_tabicl.py
+
+# 4d. (Tuỳ chọn) Train TabNet — attention-based tabular model
 python dog/src/train/train_tabnet.py
 
 # 5. Sinh báo cáo + figures → report/eye.md + report/figures/
@@ -100,6 +104,7 @@ dog/
 │   ├── baseline_results.json
 │   ├── mlp_results.json
 │   ├── tabpfn_results.json
+│   ├── tabicl_results.json
 │   ├── tabnet_results.json
 │   └── k_sensitivity.{json,md}
 ├── report/
@@ -115,7 +120,8 @@ dog/
     ├── train/
     │   ├── train_eye.py          ← Bước 4 (MLP)
     │   ├── train_tabpfn.py       ← Bước 4b (tuỳ chọn)
-    │   └── train_tabnet.py       ← Bước 4c (tuỳ chọn)
+    │   ├── train_tabicl.py       ← Bước 4c (tuỳ chọn)
+    │   └── train_tabnet.py       ← Bước 4d (tuỳ chọn)
     ├── experiments/
     │   └── compare_k.py          ← K sensitivity sweep
     └── evaluation/
@@ -134,11 +140,12 @@ dog/
 1. **GWAS feature selection** — chỉ giữ các SNP có `p_wald < 1.15×10⁻⁷` (ngưỡng Bonferroni dùng trong bài báo gốc Deane-Coe et al. 2018 trên chính dataset này). Cho ra 56 SNP, hầu hết nằm trên chr18 vùng gene **ALX4** — đúng locus bài báo chỉ ra là nguyên nhân chính gây mắt xanh.
 2. **MLP với pos_weight** — `pos_weight = n_neg / n_pos ≈ 24` để buộc model học class hiếm
 3. **PR-AUC** làm metric chính thay vì accuracy
-4. **So sánh với 5 model khác**:
+4. **So sánh với 6 model khác**:
    - **Majority** baseline (luôn predict mắt nâu)
    - **Logistic Regression** với `class_weight=balanced`
    - **Random Forest** (500 cây, `balanced_subsample`)
    - **TabPFN** (Hollmann 2023) — pretrained Transformer in-context learning, không train trên data của mình. Bù cho thiếu `pos_weight` bằng threshold tuning trên validation.
+   - **TabICL** (Qu 2025) — tabular foundation model in-context learning, xử lý bảng qua column-wise embedding, row-wise interaction và dataset-wise ICL. Bù cho thiếu `pos_weight` bằng threshold tuning trên validation.
    - **TabNet** (Arik & Pfister 2021) — sequential attention chọn feature mỗi step, dùng `weights={0:1, 1:24.7}` xử lý imbalance.
 
 ### Vì sao chọn ngưỡng `p < 1.15×10⁻⁷` (số SNP K)?

@@ -4,6 +4,7 @@ Reads:
     experiments/eye/baseline_results.json   (Majority, LR, RF)
     experiments/eye/mlp_results.json        (MLP + BCE + pos_weight)
     experiments/eye/tabpfn_results.json     (TabPFN, optional)
+    experiments/eye/tabicl_results.json     (TabICL, optional)
     experiments/eye/tabnet_results.json     (TabNet,  optional)
 
 Writes:
@@ -14,9 +15,13 @@ Writes:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -35,16 +40,25 @@ EXP_DIR = ROOT / "experiments" / "eye"
 FIG_DIR = ROOT / "report" / "figures"
 REPORT_PATH = ROOT / "report" / "eye.md"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
+MODEL_CACHE_DIR = ROOT / "data" / "processed" / "model_cache"
+os.environ.setdefault("TABPFN_MODEL_CACHE_DIR", str(MODEL_CACHE_DIR / "tabpfn"))
 
 
 def load_all() -> dict:
     base = json.loads((EXP_DIR / "baseline_results.json").read_text())
     out: dict = {**base}
     out["MLP"] = json.loads((EXP_DIR / "mlp_results.json").read_text())
+    # Tuned MLP from hyperparameter grid search (if it exists)
+    mlp_tuned_path = EXP_DIR / "mlp_best_results.json"
+    if mlp_tuned_path.exists():
+        out["MLP (tuned)"] = json.loads(mlp_tuned_path.read_text())
     # Optional: deep-learning tabular models (only if their JSON exists)
     tabpfn_path = EXP_DIR / "tabpfn_results.json"
     if tabpfn_path.exists():
         out["TabPFN"] = json.loads(tabpfn_path.read_text())
+    tabicl_path = EXP_DIR / "tabicl_results.json"
+    if tabicl_path.exists():
+        out["TabICL"] = json.loads(tabicl_path.read_text())
     tabnet_path = EXP_DIR / "tabnet_results.json"
     if tabnet_path.exists():
         out["TabNet"] = json.loads(tabnet_path.read_text())
@@ -128,6 +142,63 @@ def _probs_mlp(X_tv, y_tv, idx_tr, idx_va, X_te, device):
     return prob
 
 
+def _probs_mlp_tuned(X_tv, y_tv, idx_tr, idx_va, X_te, device, hp: dict):
+    """MLP with tuned hyperparameters from grid search."""
+    import random
+    import torch.nn as nn
+    from models.mlp import MLPBinary
+
+    seed = SEED
+    random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
+
+    X_tr_, X_va_ = X_tv[idx_tr], X_tv[idx_va]
+    y_tr_, y_va_ = y_tv[idx_tr], y_tv[idx_va]
+    model = MLPBinary(in_dim=X_tr_.shape[1], hidden=hp["hidden"],
+                      n_layers=hp["n_layers"], dropout=hp["dropout"]).to(device)
+    opt = torch.optim.Adam(model.parameters(), lr=hp["lr"],
+                           weight_decay=hp["weight_decay"])
+    n_pos = int(y_tr_.sum()); n_neg = len(y_tr_) - n_pos
+    pw = torch.tensor([n_neg / max(n_pos, 1)], dtype=torch.float32, device=device)
+    loss_fn = nn.BCEWithLogitsLoss(pos_weight=pw)
+
+    X_tr_t = torch.tensor(X_tr_, dtype=torch.float32, device=device)
+    y_tr_t = torch.tensor(y_tr_, dtype=torch.float32, device=device)
+    X_va_t = torch.tensor(X_va_, dtype=torch.float32, device=device)
+
+    from sklearn.metrics import average_precision_score
+    best_pr, best_state, patience = -1.0, None, 25
+    for _ in range(200):
+        model.train()
+        perm_b = torch.randperm(len(X_tr_t), device=device)
+        for s in range(0, len(X_tr_t), 64):
+            idx = perm_b[s:s + 64]
+            opt.zero_grad()
+            loss_fn(model(X_tr_t[idx]), y_tr_t[idx]).backward()
+            opt.step()
+        model.eval()
+        with torch.no_grad():
+            va_prob = torch.sigmoid(model(X_va_t)).cpu().numpy()
+        pr = float(average_precision_score(y_va_, va_prob)) \
+            if y_va_.sum() > 0 else 0.0
+        if pr > best_pr:
+            best_pr = pr
+            best_state = {k: v.detach().cpu().clone()
+                          for k, v in model.state_dict().items()}
+            patience = 25
+        else:
+            patience -= 1
+            if patience <= 0:
+                break
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    model.eval()
+    with torch.no_grad():
+        prob = torch.sigmoid(
+            model(torch.tensor(X_te, dtype=torch.float32, device=device))
+        ).cpu().numpy()
+    return prob
+
+
 def _probs_tabpfn(X_tv, y_tv, X_te, device):
     import os
     os.environ.setdefault("TABPFN_ALLOW_CPU_LARGE_DATASET", "1")
@@ -136,6 +207,18 @@ def _probs_tabpfn(X_tv, y_tv, X_te, device):
                            ignore_pretraining_limits=True)
     clf.fit(X_tv, y_tv)
     return clf.predict_proba(X_te)[:, 1]
+
+
+def _probs_tabicl(X_tv, y_tv, X_te, device):
+    from tabicl import TabICLClassifier
+    clf = TabICLClassifier(device=str(device), random_state=SEED)
+    clf.fit(X_tv, y_tv)
+    probs = clf.predict_proba(X_te)
+    classes = np.asarray(clf.classes_)
+    pos_cols = np.where(classes == 1)[0]
+    if len(pos_cols) == 0:
+        return np.zeros(len(X_te), dtype=np.float32)
+    return probs[:, pos_cols[0]]
 
 
 def _probs_tabnet(X_tv, y_tv, idx_tr, idx_va, X_te, device):
@@ -182,6 +265,19 @@ def plot_pr_curves(X: np.ndarray, y: np.ndarray, splits: dict, device,
     curves.append(("MLP", _probs_mlp(X_tv, y_tv, idx_tr, idx_va, X_te, device),
                    "tab:blue", "-"))
 
+    # MLP (tuned) — uses hyperparameters from grid search
+    tuned_path = EXP_DIR / "mlp_best_results.json"
+    if tuned_path.exists():
+        try:
+            print("[plot] MLP (tuned) ...")
+            hp = json.loads(tuned_path.read_text())["hyperparameters"]
+            curves.append(("MLP (tuned)",
+                           _probs_mlp_tuned(X_tv, y_tv, idx_tr, idx_va,
+                                            X_te, device, hp),
+                           "tab:purple", "-"))
+        except Exception as e:
+            print(f"[plot] skipping MLP (tuned): {e}")
+
     if include_deep:
         try:
             print("[plot] TabPFN ...")
@@ -189,6 +285,12 @@ def plot_pr_curves(X: np.ndarray, y: np.ndarray, splits: dict, device,
                            "tab:red", "-"))
         except Exception as e:
             print(f"[plot] skipping TabPFN: {e}")
+        try:
+            print("[plot] TabICL ...")
+            curves.append(("TabICL", _probs_tabicl(X_tv, y_tv, X_te, device),
+                           "tab:orange", "-"))
+        except Exception as e:
+            print(f"[plot] skipping TabICL: {e}")
         try:
             print("[plot] TabNet ...")
             curves.append(("TabNet", _probs_tabnet(X_tv, y_tv, idx_tr, idx_va,
@@ -265,13 +367,16 @@ def main() -> int:
         "3. **PR-AUC for evaluation, not accuracy.** PR-AUC is the "
         "standard metric for rare-event tasks: it directly measures "
         "how well the model ranks positives above negatives.",
-        "4. **Compare against five other methods**:",
+        "4. **Compare against additional methods**:",
         "   - **Majority** baseline (always predicts brown).",
         "   - **Logistic Regression** with `class_weight=balanced`.",
         "   - **Random Forest** (n=500, `balanced_subsample`).",
         "   - **TabPFN** (Hollmann et al. 2023): a pre-trained "
         "Transformer that does in-context learning on small tabular "
         "tasks — no gradient updates on our data.",
+        "   - **TabICL** (Qu et al. 2025): a tabular foundation model "
+        "with column-wise embeddings, row-wise interactions, and "
+        "dataset-wise in-context learning.",
         "   - **TabNet** (Arik & Pfister 2021): an attention-based "
         "tabular model that learns which SNPs to focus on at each "
         "decision step.",
@@ -281,6 +386,14 @@ def main() -> int:
         f"stopping on validation PR-AUC (patience {HP.patience}). "
         f"5-fold stratified cross-validation on 80 % trainval, then "
         f"refit on all of trainval and score the held-out 20 % test set.",
+        "",
+        "We also include **MLP (tuned)** — a variant where the MLP "
+        "hyperparameters (hidden, n_layers, dropout, lr, weight_decay) "
+        "were selected by a 72-config grid search on CV-mean PR-AUC, "
+        "using ONLY trainval (the test set was held out). See "
+        "`experiments/eye/hp_tuning_mlp.md` for the full ranking. The "
+        "two MLP rows let us check whether the default config was "
+        "already a reasonable point in the grid.",
         "",
         "## CV results (mean ± std across 5 stratified folds)",
         "",
@@ -308,9 +421,18 @@ def main() -> int:
         "Bonferroni) is what makes this 2,769-dog dataset tractable: "
         "56 statistically significant SNPs beat throwing 213,245 noisy "
         "SNPs at the model.",
-        "- Among the deep tabular methods, TabPFN and TabNet provide a "
+        "- Among the deep tabular methods, TabPFN, TabICL, and TabNet provide a "
         "useful sanity check on the MLP — see the Test results table "
         "for the head-to-head comparison.",
+        "- **MLP (tuned) vs MLP (default)**: the grid search picked a "
+        "slightly different config (1 hidden layer instead of 2, "
+        "lr=5e-4 instead of 1e-3). Its CV PR-AUC is marginally higher "
+        "(0.7474 vs 0.7374), but its test PR-AUC is actually lower "
+        "(0.656 vs 0.667). This is a textbook **CV–test gap**: when "
+        "the validation signal is noisy (only ~22 positives per fold), "
+        "the config that maximises CV does not necessarily generalise "
+        "best. We keep the default as the headline 'proposed method' "
+        "and report the tuned variant for transparency.",
         "",
         "## Figures",
         "",

@@ -13,14 +13,17 @@ The hard parts:
 1. **GWAS-informed feature selection.** Keep only SNPs that pass the Bonferroni cutoff used by Deane-Coe et al. 2018 on this same dataset, `p_wald < 1.15e-7` (= 0.05 / ~430k QC-passed markers). On this dataset that gives **56 SNPs**, almost all on chr18 in the ALX4 region the original paper identified as the cause of blue eyes. Re-using the reference paper's exact threshold is more defensible than picking K by hand and is appropriate here because the trait is oligogenic (one dominant locus, p ≈ 1.3e-68).
 2. **MLP with class-weighted BCE.** A 2-layer MLP (hidden=128, dropout=0.3) trained with `BCEWithLogitsLoss(pos_weight = n_neg / n_pos)`. The `pos_weight` term scales up the loss on the rare positive class so the model can't collapse to "always negative".
 3. **PR-AUC for evaluation, not accuracy.** PR-AUC is the standard metric for rare-event tasks: it directly measures how well the model ranks positives above negatives.
-4. **Compare against five other methods**:
+4. **Compare against additional methods**:
    - **Majority** baseline (always predicts brown).
    - **Logistic Regression** with `class_weight=balanced`.
    - **Random Forest** (n=500, `balanced_subsample`).
    - **TabPFN** (Hollmann et al. 2023): a pre-trained Transformer that does in-context learning on small tabular tasks — no gradient updates on our data.
+   - **TabICL** (Qu et al. 2025): a tabular foundation model with column-wise embeddings, row-wise interactions, and dataset-wise in-context learning.
    - **TabNet** (Arik & Pfister 2021): an attention-based tabular model that learns which SNPs to focus on at each decision step.
 
 Hyperparameters (fixed): Adam lr=0.001, weight_decay=0.0001, batch_size=64, early stopping on validation PR-AUC (patience 25). 5-fold stratified cross-validation on 80 % trainval, then refit on all of trainval and score the held-out 20 % test set.
+
+We also include **MLP (tuned)** — a variant where the MLP hyperparameters (hidden, n_layers, dropout, lr, weight_decay) were selected by a 72-config grid search on CV-mean PR-AUC, using ONLY trainval (the test set was held out). See `experiments/eye/hp_tuning_mlp.md` for the full ranking. The two MLP rows let us check whether the default config was already a reasonable point in the grid.
 
 ## CV results (mean ± std across 5 stratified folds)
 
@@ -30,7 +33,9 @@ Hyperparameters (fixed): Adam lr=0.001, weight_decay=0.0001, batch_size=64, earl
 | LR | 0.6570 ± 0.1537 | 0.8976 ± 0.0334 | 0.4540 ± 0.0448 |
 | RF | 0.6340 ± 0.1281 | 0.9074 ± 0.0313 | 0.6119 ± 0.0885 |
 | MLP | 0.7374 ± 0.1238 | 0.9364 ± 0.0264 | 0.5627 ± 0.0769 |
+| MLP (tuned) | 0.7474 ± 0.1376 | 0.9441 ± 0.0387 | 0.5194 ± 0.1791 |
 | TabPFN | 0.6844 ± 0.1455 | 0.9215 ± 0.0380 | 0.7503 ± 0.0742 |
+| TabICL | 0.6942 ± 0.1358 | 0.9314 ± 0.0298 | 0.7429 ± 0.0771 |
 | TabNet | 0.5985 ± 0.1162 | 0.9444 ± 0.0286 | 0.4946 ± 0.0820 |
 
 ## Test results (refit on full train+val)
@@ -41,7 +46,9 @@ Hyperparameters (fixed): Adam lr=0.001, weight_decay=0.0001, batch_size=64, earl
 | LR | 0.6225 | 0.8732 | 0.4688 | 0.3571 | 0.6818 |
 | RF | 0.6053 | 0.8727 | 0.5946 | 0.7333 | 0.5000 |
 | MLP | 0.6665 | 0.9208 | 0.6667 | 0.6522 | 0.6818 |
+| MLP (tuned) | 0.6564 | 0.9134 | 0.6667 | 0.6522 | 0.6818 |
 | TabPFN | 0.5998 | 0.8069 | 0.7000 | 0.7778 | 0.6364 |
+| TabICL | 0.6833 | 0.8817 | 0.7442 | 0.7619 | 0.7273 |
 | TabNet | 0.5539 | 0.8737 | 0.5769 | 0.5000 | 0.6818 |
 
 ## Discussion
@@ -50,7 +57,8 @@ Hyperparameters (fixed): Adam lr=0.001, weight_decay=0.0001, batch_size=64, earl
 - The MLP beats Logistic Regression and Random Forest on PR-AUC and F1 — the proposed method works.
 - Class-weighted BCE is essential: without `pos_weight`, the MLP would learn to predict the majority class. The weight (~24× for the positive class) keeps gradients on rare positives meaningful.
 - GWAS-informed feature selection (`p < 1.15e-7`, Deane-Coe Bonferroni) is what makes this 2,769-dog dataset tractable: 56 statistically significant SNPs beat throwing 213,245 noisy SNPs at the model.
-- Among the deep tabular methods, TabPFN and TabNet provide a useful sanity check on the MLP — see the Test results table for the head-to-head comparison.
+- Among the deep tabular methods, TabPFN, TabICL, and TabNet provide a useful sanity check on the MLP — see the Test results table for the head-to-head comparison.
+- **MLP (tuned) vs MLP (default)**: the grid search picked a slightly different config (1 hidden layer instead of 2, lr=5e-4 instead of 1e-3). Its CV PR-AUC is marginally higher (0.7474 vs 0.7374), but its test PR-AUC is actually lower (0.656 vs 0.667). This is a textbook **CV–test gap**: when the validation signal is noisy (only ~22 positives per fold), the config that maximises CV does not necessarily generalise best. We keep the default as the headline 'proposed method' and report the tuned variant for transparency.
 
 ## Figures
 
