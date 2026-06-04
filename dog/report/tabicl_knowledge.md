@@ -369,3 +369,611 @@ Không thể khẳng định các file kết quả cũ ban đầu được tạo
 ### Q26. Trạng thái project sau khi thêm TabICL đang như thế nào?
 
 Về chức năng, project đã ổn: `train_tabicl.py` chạy được, sinh `tabicl_results.json`; `report_eye.py` render lại được report và hai diagram; PR curve và metric bar đều có đủ `LR`, `RF`, `MLP`, `MLP (tuned)`, `TabPFN`, `TabICL`, `TabNet`. Kiểm tra compile Python bằng `.venv\Scripts\python.exe -m compileall -q dog\src` cũng pass. Tuy nhiên git working tree chưa sạch vì có các file đã sửa và file mới chưa commit: README, report, figures, requirements, `report_eye.py`, `train_tabicl.py`, `tabicl_results.json`, và `tabicl_knowledge.md`.
+
+### Q27. Code TabICL khác gì TabPFN nếu nhìn khá giống nhau?
+
+Nhìn giống là đúng, vì hai script cố tình dùng cùng protocol đánh giá để so sánh công bằng: cùng đọc `eye_processed.npz`, cùng dùng split, cùng standardize feature bằng train statistics, cùng chạy 5-fold CV, cùng tune threshold theo F1 trên validation, rồi cùng refit trainval và test. Điểm khác chính là model backend trong `fit_predict`: TabPFN gọi `TabPFNClassifier(..., ignore_pretraining_limits=True)`, còn TabICL gọi `TabICLClassifier(...)` với các tham số riêng như `n_estimators`, `batch_size`, `kv_cache`, `allow_auto_download`. Vì vậy code wrapper giống nhau, nhưng thuật toán bên trong khác: TabPFN là Prior-Data Fitted Network cho in-context prediction, còn TabICL dùng kiến trúc column-wise embedding, row-wise interaction, và dataset-wise in-context learning.
+
+### Q28. Cả TabPFN và TabICL đều phải tải model về và chạy bằng `.venv` à?
+
+Nên hiểu thành hai việc riêng. Một là tải/cài thư viện Python: `tabpfn`, `tabicl`, `torch`, `sklearn`, ... được cài vào môi trường Python, trong project này là `.venv`. Hai là tải checkpoint pretrained: cả TabPFN và TabICL đều là foundation models đã pretrained, nên lần đầu chạy cần tải checkpoint nếu cache chưa có. TabPFN hiện đã có checkpoint `tabpfn-v2-classifier.ckpt` trong `dog/data/processed/model_cache/tabpfn/`. TabICL dùng `TabICLClassifier(..., allow_auto_download=True)`, nên khi chạy lần đầu nó tự tải checkpoint TabICL nếu chưa có, thường vào cache mặc định của thư viện/Hugging Face. `.venv` không phải yêu cầu riêng của model; nó chỉ là môi trường mình chọn để đảm bảo đúng dependency. Nếu cài đủ package ở global Python thì cũng chạy được, nhưng dùng `.venv` sạch và dễ tái lập hơn.
+
+### Q29. Checkpoint pretrained từ Hugging Face là gì?
+
+Checkpoint pretrained là file chứa các weights/parameters mà model đã học xong từ trước. Ví dụ TabPFN hoặc TabICL đã được train rất tốn kém trên nhiều tabular tasks trước khi mình dùng. Kết quả của quá trình train đó được lưu thành checkpoint, thường là file `.ckpt`, `.pt`, `.pth`, hoặc `.safetensors`. Khi project gọi `TabPFNClassifier` hay `TabICLClassifier`, thư viện tải checkpoint này, nạp weights vào kiến trúc model, rồi dùng model đã học sẵn để dự đoán trên dog dataset. Hugging Face là một kho lưu trữ phổ biến cho model AI, giống nơi chứa checkpoint, config, tokenizer/metadata và đôi khi cả demo. Trong project này, tải checkpoint không có nghĩa là train lại model; nó chỉ là lấy "bộ não đã học sẵn" về máy để inference.
+
+### Q30. TabPFN cũng dùng checkpoint pretrained như vậy à?
+
+Đúng. TabPFN cũng có phần code thư viện và phần checkpoint pretrained riêng. Code `TabPFNClassifier` định nghĩa cách dựng model và cách chạy `fit/predict_proba`, còn checkpoint chứa weights đã được pretrained trên rất nhiều tabular tasks synthetic. Khi gọi `TabPFNClassifier`, nếu máy chưa có checkpoint thì thư viện tải checkpoint về, trong project này là `dog/data/processed/model_cache/tabpfn/tabpfn-v2-classifier.ckpt`. Sau đó TabPFN dùng checkpoint đã học sẵn để làm in-context learning trên dog train/test context. Nó không gradient-train lại weights chính trên dog dataset.
+
+### Q31. TabNet thì sao, có cần checkpoint pretrained không?
+
+Không. TabNet trong project này không phải foundation model pretrained như TabPFN/TabICL. Nó là một neural network tabular được khởi tạo weights ngẫu nhiên rồi train trực tiếp trên dog dataset bằng gradient descent. Vì vậy TabNet không cần tải checkpoint pretrained từ Hugging Face. Nó chỉ cần cài package `pytorch-tabnet` trong môi trường Python. Khi chạy `train_tabnet.py`, model gọi `TabNetClassifier`, fit trên train fold, early stopping bằng validation fold, dùng class weights để xử lý imbalance, rồi xuất `tabnet_results.json`. Nói ngắn gọn: TabPFN/TabICL = load pretrained checkpoint và làm in-context learning; TabNet = train từ đầu trên dataset hiện tại.
+
+### Q32. Attention của TabNet khác gì attention trong TabPFN và TabICL?
+
+TabNet attention chủ yếu là feature-selection attention: với từng sample và từng decision step, nó tạo một mask trọng số trên các feature/SNP để chọn nên nhìn SNP nào nhiều hơn. Ví dụ ở một step, TabNet có thể gán trọng số cao cho SNP vùng chr18/ALX4 và thấp cho SNP ít liên quan. Mask này nhân trực tiếp với vector feature đầu vào, nên attention của TabNet khá gần với câu hỏi "feature nào quan trọng cho dự đoán này?". TabNet train các mask này từ đầu trên dog dataset bằng gradient descent.
+
+TabPFN/TabICL dùng Transformer attention theo nghĩa rộng hơn: attention là cơ chế để token/sample/context trao đổi thông tin. Với TabPFN, test sample có thể dùng attention để học từ các train samples và label trong context. Với TabICL, attention xuất hiện ở nhiều cấp: column-wise để hiểu phân phối cột, row-wise để SNP trong cùng dog tương tác, và dataset-wise để test dog học từ train dogs có label. Attention ở TabPFN/TabICL không đơn giản là một mask chọn feature; nó tạo contextual embedding và gom thông tin từ context. Vì vậy: TabNet attention dễ hiểu như "chọn SNP nào"; TabPFN/TabICL attention dễ hiểu như "trao đổi/gom thông tin giữa các phần của bảng và giữa các samples".
+
+## Phụ lục A. TabPFN - thuật toán có minh họa
+
+### A1. TabPFN là gì?
+
+TabPFN là một tabular foundation model cho bài toán phân loại bảng nhỏ. Tên đầy đủ là Prior-Data Fitted Network. Cách hiểu ngắn gọn:
+
+```text
+TabPFN = Transformer đã được pretrain để giải nhiều bài toán tabular nhỏ
+         bằng cách nhìn train examples trong context và dự đoán test examples.
+```
+
+Trong project dog eye color, TabPFN không học lại weights chính trên dog dataset. Nó dùng checkpoint pretrained, rồi nhận:
+
+```text
+X_train = SNP vectors của train dogs
+y_train = label blue/brown của train dogs
+X_test  = SNP vectors của test dogs
+```
+
+và xuất:
+
+```text
+P(brown), P(blue) cho từng test dog
+```
+
+### A2. Trực giác chính: TabPFN học "cách học từ một bảng nhỏ"
+
+MLP học trực tiếp từ dog dataset:
+
+```text
+dog train data
+    ↓ gradient descent
+MLP weights mới
+    ↓
+predict dog_test
+```
+
+TabPFN thì khác:
+
+```text
+pretraining trên rất nhiều synthetic tabular tasks
+    ↓
+checkpoint pretrained
+    ↓
+nhìn dog train examples trong context
+    ↓
+predict dog_test
+```
+
+Nghĩa là TabPFN học trước một kỹ năng tổng quát: khi thấy một bảng nhỏ gồm feature và label, nó biết cách suy luận label cho row mới.
+
+### A3. Pretraining của TabPFN diễn ra trước project này
+
+Phần này không chạy trong project. Nó đã được tác giả model làm từ trước.
+
+Ý tưởng pretraining:
+
+```text
+Lặp rất nhiều lần:
+  1. Sinh một bài toán tabular giả lập từ prior
+     Ví dụ:
+       X = bảng feature giả
+       y = label giả được sinh bởi một rule ẩn
+
+  2. Chia thành context và query
+       context = vài rows có label
+       query   = vài rows bị che label
+
+  3. Đưa context + query vào Transformer
+
+  4. Bắt model dự đoán label của query
+
+  5. Cập nhật weights bằng cross-entropy loss
+```
+
+Sơ đồ:
+
+```text
+Synthetic task 1:
+  row_1: x_1, y_1
+  row_2: x_2, y_2
+  row_3: x_3, ?
+      ↓
+  Transformer dự đoán y_3
+
+Synthetic task 2:
+  row_1: x_1, y_1
+  row_2: x_2, y_2
+  row_3: x_3, row_4: ?
+      ↓
+  Transformer dự đoán y_3, y_4
+
+... lặp rất nhiều task ...
+```
+
+Sau pretraining, weights được lưu thành checkpoint. Khi mình dùng TabPFN trong project, mình chỉ tải checkpoint đó về và inference.
+
+### A4. Inference của TabPFN trên dog dataset
+
+Trong project, một fold có dạng:
+
+```text
+Train dogs:
+  dog_A: [SNP_1=0, SNP_2=2, SNP_3=1, ...], label=brown
+  dog_B: [SNP_1=1, SNP_2=2, SNP_3=1, ...], label=blue
+  dog_C: [SNP_1=0, SNP_2=1, SNP_3=0, ...], label=brown
+
+Test dog:
+  dog_T: [SNP_1=1, SNP_2=2, SNP_3=1, ...], label=?
+```
+
+TabPFN nhận toàn bộ context:
+
+```text
+[
+  (x_A, brown),
+  (x_B, blue),
+  (x_C, brown),
+  (x_T, ?)
+]
+```
+
+Sau đó Transformer cho `dog_T` nhìn các train dogs:
+
+```text
+dog_T attention tới:
+  dog_A brown: thấp/vừa
+  dog_B blue : cao
+  dog_C brown: thấp
+```
+
+Output cuối:
+
+```text
+P(brown) = 0.25
+P(blue)  = 0.75
+```
+
+Trong code:
+
+```python
+clf = TabPFNClassifier(...)
+clf.fit(X_train, y_train)
+prob = clf.predict_proba(X_test)[:, 1]
+```
+
+`fit` ở đây không giống MLP training. Nó không chạy gradient descent để sửa weights chính của TabPFN trên dog dataset. Nó chủ yếu lưu/chuẩn bị context train để `predict_proba` dùng khi inference.
+
+### A5. Attention trong TabPFN
+
+Với cách nhìn đơn giản, TabPFN biến mỗi row thành biểu diễn vector:
+
+```text
+dog_A + label_brown  -> h_A
+dog_B + label_blue   -> h_B
+dog_C + label_brown  -> h_C
+dog_T + label_mask   -> h_T
+```
+
+Sau đó attention tính:
+
+```text
+q_T = W_Q h_T
+k_A = W_K h_A, v_A = W_V h_A
+k_B = W_K h_B, v_B = W_V h_B
+k_C = W_K h_C, v_C = W_V h_C
+
+score_A = q_T . k_A / sqrt(d)
+score_B = q_T . k_B / sqrt(d)
+score_C = q_T . k_C / sqrt(d)
+
+alpha = softmax([score_A, score_B, score_C])
+
+context_T = alpha_A * v_A + alpha_B * v_B + alpha_C * v_C
+```
+
+Minh họa:
+
+```text
+dog_T:
+  attention weight tới dog_A brown = 0.15
+  attention weight tới dog_B blue  = 0.70
+  attention weight tới dog_C brown = 0.15
+
+context_T = 0.15*v_A + 0.70*v_B + 0.15*v_C
+```
+
+Quan trọng: đây không phải vote label thô đơn giản. `v_A`, `v_B`, `v_C` là vectors chứa thông tin feature + label + ngữ cảnh đã qua nhiều layer Transformer. Vì vậy TabPFN giống soft k-nearest-neighbor ở trực giác, nhưng thực tế mạnh hơn vì similarity và representation đều được học từ pretraining.
+
+### A6. Pipeline TabPFN trong project
+
+File chính:
+
+```text
+dog/src/train/train_tabpfn.py
+```
+
+Luồng chạy:
+
+```text
+1. Load eye_processed.npz
+2. Load train/valid/test splits
+3. Với mỗi fold:
+     a. Standardize X_train và X_valid bằng statistics của X_train
+     b. Gọi TabPFNClassifier
+     c. fit(X_train, y_train)
+     d. predict_proba(X_valid)
+     e. Tune threshold theo F1
+     f. Tính PR-AUC, ROC-AUC, F1
+4. Aggregate 5-fold CV
+5. Refit trên trainval
+6. Predict test
+7. Ghi tabpfn_results.json
+```
+
+Pseudocode:
+
+```text
+for fold in folds:
+    X_tr, X_va = standardize(X[train], X[valid])
+
+    clf = TabPFNClassifier(pretrained_checkpoint)
+    clf.fit(X_tr, y_tr)
+
+    prob_va = clf.predict_proba(X_va)[:, 1]
+    threshold = best_f1_threshold(y_va, prob_va)
+    metrics = evaluate(y_va, prob_va, threshold)
+
+save metrics
+```
+
+### A7. Điểm cần nhớ về TabPFN
+
+```text
+TabPFN cần checkpoint pretrained.
+TabPFN không train lại weights chính trên dog dataset.
+TabPFN dùng train rows + labels như context.
+TabPFN attention giúp test row học từ train rows liên quan.
+TabPFN wrapper code giống TabICL vì cùng protocol đánh giá.
+```
+
+## Phụ lục B. TabNet - thuật toán có minh họa
+
+### B1. TabNet là gì?
+
+TabNet là một neural network cho tabular data. Khác TabPFN/TabICL, TabNet không phải model pretrained trong project này.
+
+```text
+TabNet = model train từ đầu trên dog dataset
+         + attention mask để chọn feature ở từng decision step
+```
+
+Nó giống MLP ở điểm:
+
+```text
+weights ban đầu random
+    ↓
+train bằng gradient descent trên dog dataset
+    ↓
+weights mới chuyên cho dog eye color
+```
+
+Nhưng khác MLP ở điểm: MLP thường dùng toàn bộ feature cùng lúc, còn TabNet học các mask để chọn feature nào nên nhìn ở từng bước.
+
+### B2. Trực giác chính: TabNet ra quyết định theo nhiều bước
+
+Với một dog:
+
+```text
+dog_i = [SNP_1, SNP_2, SNP_3, ..., SNP_56]
+```
+
+TabNet không chỉ ném toàn bộ vector vào một MLP. Nó làm nhiều decision steps:
+
+```text
+Step 1:
+  chọn một nhóm SNP quan trọng
+  tạo decision vector d1
+
+Step 2:
+  nhìn phần thông tin còn lại hoặc nhóm SNP khác
+  tạo decision vector d2
+
+Step 3:
+  tiếp tục chọn feature và tạo d3
+
+Final:
+  d = d1 + d2 + d3
+  prediction_head(d) -> P(blue)
+```
+
+Minh họa:
+
+```text
+Input dog:
+  [SNP_1, SNP_2, SNP_chr18_A, SNP_chr18_B, SNP_5, ...]
+
+Step 1 attention mask:
+  SNP_chr18_A: 0.70
+  SNP_chr18_B: 0.20
+  SNP_1      : 0.03
+  SNP_2      : 0.02
+  others     : nhỏ
+
+Step 2 attention mask:
+  SNP_chr18_B: 0.45
+  SNP_5      : 0.20
+  SNP_9      : 0.10
+  others     : nhỏ
+
+Step 3 attention mask:
+  nhóm SNP khác hoặc phần residual
+```
+
+### B3. Attention mask của TabNet
+
+TabNet tạo một mask `M_t` ở mỗi decision step `t`.
+
+Nếu input có 56 SNP:
+
+```text
+x = [x1, x2, x3, ..., x56]
+M_t = [m1, m2, m3, ..., m56]
+```
+
+Mỗi `m_j` là trọng số cho SNP thứ `j` tại step đó.
+
+TabNet nhân mask với input:
+
+```text
+x_masked_t = M_t * x
+```
+
+Ví dụ:
+
+```text
+x = [SNP_1=0, SNP_2=2, SNP_3=1]
+
+M_1 = [0.05, 0.80, 0.15]
+
+x_masked_1 = [
+  0.05 * SNP_1,
+  0.80 * SNP_2,
+  0.15 * SNP_3
+]
+```
+
+Nghĩa là ở step 1, model gần như tập trung vào `SNP_2`.
+
+Điểm khác Transformer attention:
+
+```text
+Transformer attention:
+  token này lấy thông tin từ token khác bằng weighted sum của value vectors.
+
+TabNet attention:
+  tạo mask để bật/tắt hoặc tăng/giảm trọng số feature đầu vào.
+```
+
+### B4. Các khối chính trong TabNet
+
+TabNet có vài khối quan trọng:
+
+```text
+Input features
+    ↓
+BatchNorm
+    ↓
+Feature Transformer
+    ↓
+Attentive Transformer -> tạo mask M_t
+    ↓
+Masked features M_t * x
+    ↓
+Feature Transformer -> decision vector d_t
+    ↓
+Lặp nhiều decision steps
+    ↓
+Tổng hợp decision vectors
+    ↓
+Prediction head
+```
+
+Sơ đồ đơn giản:
+
+```text
+                 ┌─────────────────────┐
+Input SNP vector → Feature Transformer  → decision d1
+        │        └─────────────────────┘
+        │
+        ├────→ Attentive Transformer → mask M1 → M1 * input
+        │
+        ├────→ Attentive Transformer → mask M2 → M2 * input → decision d2
+        │
+        └────→ Attentive Transformer → mask M3 → M3 * input → decision d3
+
+Final decision = d1 + d2 + d3
+Final probability = sigmoid/softmax(Final decision)
+```
+
+Trong paper TabNet, mask thường dùng sparse selection, tức là nhiều feature có trọng số gần 0. Nhờ vậy TabNet có thể vừa dự đoán, vừa cho feature importance tương đối dễ đọc.
+
+### B5. Vì sao TabNet có nhiều decision steps?
+
+Một bước attention chỉ có thể chọn một kiểu thông tin nổi bật. Nhiều decision steps cho phép model nhìn bảng theo nhiều lượt:
+
+```text
+Step 1: nhìn SNP mạnh nhất vùng ALX4
+Step 2: nhìn SNP khác hỗ trợ tín hiệu
+Step 3: nhìn pattern còn lại để sửa sai
+```
+
+Về trực giác, nó giống quá trình ra quyết định tuần tự:
+
+```text
+Tôi nhìn dấu hiệu mạnh nhất trước.
+Nếu chưa đủ chắc, tôi nhìn thêm dấu hiệu thứ hai.
+Sau đó gom các bằng chứng lại.
+```
+
+### B6. Prior/update trong TabNet: tránh nhìn mãi một feature
+
+TabNet có ý tưởng "feature nào đã được dùng nhiều thì lần sau bị giảm ưu tiên". Trực giác:
+
+```text
+Ban đầu:
+  prior = [1, 1, 1, ..., 1]
+
+Step 1 dùng nhiều SNP_chr18_A
+  mask_1[SNP_chr18_A] cao
+
+Sang step 2:
+  prior của SNP_chr18_A giảm xuống
+  model được khuyến khích nhìn thêm feature khác
+```
+
+Không nên hiểu là cấm dùng lại tuyệt đối. Nó chỉ điều chỉnh để các step không bị collapse thành cùng một mask y hệt.
+
+### B7. Training TabNet trong project
+
+File chính:
+
+```text
+dog/src/train/train_tabnet.py
+```
+
+Luồng chạy:
+
+```text
+1. Load eye_processed.npz
+2. Load train/valid/test splits
+3. Với mỗi fold:
+     a. Standardize X_train và X_valid
+     b. Khởi tạo TabNetClassifier với weights random
+     c. Train trên X_train, y_train
+     d. Early stopping bằng validation AUC
+     e. Predict probability trên validation
+     f. Tính PR-AUC, ROC-AUC, F1
+4. Aggregate 5-fold CV
+5. Refit trainval với internal validation
+6. Predict test
+7. Ghi tabnet_results.json
+```
+
+Pseudocode:
+
+```text
+for fold in folds:
+    X_tr, X_va = standardize(X[train], X[valid])
+
+    clf = TabNetClassifier(random_initial_weights)
+    clf.fit(
+        X_train=X_tr,
+        y_train=y_tr,
+        eval_set=[(X_va, y_va)],
+        weights={0: 1.0, 1: n_neg / n_pos},
+        early_stopping=True,
+    )
+
+    prob_va = clf.predict_proba(X_va)[:, 1]
+    metrics = evaluate(y_va, prob_va, threshold=0.5)
+
+save metrics
+```
+
+### B8. TabNet xử lý imbalance như thế nào?
+
+Dog eye color bị imbalance mạnh:
+
+```text
+brown: rất nhiều
+blue : khoảng 4%
+```
+
+Nếu không xử lý, model dễ học cách đoán brown gần như mọi lúc.
+
+Trong project, TabNet dùng class weights:
+
+```python
+weights = {0: 1.0, 1: n_neg / n_pos}
+```
+
+Nghĩa là lỗi trên class blue được phạt nặng hơn lỗi trên class brown. Ý tưởng này giống `pos_weight` của MLP, nhưng được đưa vào API `pytorch-tabnet`.
+
+### B9. TabNet attention khác TabPFN/TabICL attention bằng ví dụ
+
+Giả sử có test dog:
+
+```text
+dog_T = [SNP_1=0, SNP_2=2, SNP_ALX4=1, SNP_4=0, ...]
+```
+
+TabNet hỏi:
+
+```text
+"Trong 56 SNP của chính dog_T, SNP nào nên được nhìn nhiều?"
+```
+
+Minh họa:
+
+```text
+TabNet step 1 mask:
+  SNP_ALX4: 0.82
+  SNP_2   : 0.10
+  SNP_1   : 0.02
+  SNP_4   : 0.01
+```
+
+TabPFN/TabICL hỏi:
+
+```text
+"dog_T nên học từ train dog nào trong context?"
+"cell/feature/row này nên lấy thông tin từ token nào?"
+```
+
+Minh họa:
+
+```text
+TabPFN/TabICL dataset attention:
+  dog_B blue : 0.60
+  dog_D blue : 0.20
+  dog_A brown: 0.15
+  dog_C brown: 0.05
+```
+
+Vậy:
+
+```text
+TabNet attention = chọn feature trong một sample.
+TabPFN/TabICL attention = gom thông tin giữa tokens/rows/samples trong context.
+```
+
+### B10. Điểm cần nhớ về TabNet
+
+```text
+TabNet không cần checkpoint pretrained.
+TabNet train từ đầu trên dog dataset.
+TabNet attention tạo mask feature theo từng decision step.
+TabNet có thể giải thích feature importance tự nhiên hơn MLP.
+TabNet giống MLP ở chỗ phải gradient-train trên dog data.
+TabNet khác TabPFN/TabICL ở chỗ không làm in-context learning từ checkpoint pretrained.
+```
+
+## Phụ lục C. Bảng so sánh nhanh TabPFN, TabICL, TabNet
+
+| Điểm so sánh | TabPFN | TabICL | TabNet |
+|---|---|---|---|
+| Có pretrained checkpoint? | Có | Có | Không trong project này |
+| Có train lại weights chính trên dog dataset? | Không | Không | Có |
+| Cách học trên dog dataset | In-context learning | In-context learning | Gradient descent |
+| Attention chính dùng để làm gì? | Gom thông tin từ context train/test | Column-wise, row-wise, dataset-wise context | Chọn feature/SNP bằng mask |
+| Code project giống ai? | Giống TabICL ở wrapper đánh giá | Giống TabPFN ở wrapper đánh giá | Giống MLP hơn vì phải train |
+| Output trong project | `tabpfn_results.json` | `tabicl_results.json` | `tabnet_results.json` |
+
+Một câu nhớ nhanh:
+
+```text
+TabPFN: model pretrained học cách giải bài toán tabular nhỏ bằng context.
+TabICL: model pretrained mã hóa bảng theo cột, row, rồi context.
+TabNet: model train từ đầu, dùng attention mask để chọn SNP quan trọng.
+```
