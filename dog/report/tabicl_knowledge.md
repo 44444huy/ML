@@ -396,6 +396,24 @@ TabNet attention chủ yếu là feature-selection attention: với từng sampl
 
 TabPFN/TabICL dùng Transformer attention theo nghĩa rộng hơn: attention là cơ chế để token/sample/context trao đổi thông tin. Với TabPFN, test sample có thể dùng attention để học từ các train samples và label trong context. Với TabICL, attention xuất hiện ở nhiều cấp: column-wise để hiểu phân phối cột, row-wise để SNP trong cùng dog tương tác, và dataset-wise để test dog học từ train dogs có label. Attention ở TabPFN/TabICL không đơn giản là một mask chọn feature; nó tạo contextual embedding và gom thông tin từ context. Vì vậy: TabNet attention dễ hiểu như "chọn SNP nào"; TabPFN/TabICL attention dễ hiểu như "trao đổi/gom thông tin giữa các phần của bảng và giữa các samples".
 
+### Q33. Vì sao SNP trong project được mã hóa thành 0, 1, 2?
+
+Một SNP thường được xét như một vị trí biallelic, ví dụ có hai allele `A/G`. Vì mỗi dog có hai bản sao DNA tại vị trí autosome đó, genotype có thể là `AA`, `AG`, hoặc `GG`. Khi chọn một allele để đếm, thường là alternate allele hoặc minor allele, genotype được đổi thành số lượng allele đó. Ví dụ nếu đếm allele `G`: `AA -> 0`, `AG -> 1`, `GG -> 2`. Vì vậy `0/1/2` là dosage/count của allele được chọn, không phải ba loại SNP khác nhau. Trong bảng ML, mỗi cột SNP chứa các giá trị 0/1/2 qua nhiều dogs; TabICL dùng các cột này để học phân phối cột và tương tác SNP.
+
+### Q34. Chọn allele nào để đếm? Hai allele có phải do hai sợi DNA xoắn kép không?
+
+Allele được đếm là quy ước của dữ liệu/preprocessing. Trong VCF, SNP có `REF` và `ALT`; dosage thường đếm `ALT`, nên `0/0 -> 0`, `0/1 -> 1`, `1/1 -> 2`. Trong PLINK/GWAS, metadata có thể quy ước allele 1/allele 2, minor allele, hoặc effect allele. Nếu đổi allele được đếm thì giá trị đảo lại theo `x -> 2 - x`; ví dụ đếm `G` thì `AA=0, AG=1, GG=2`, còn đếm `A` thì `AA=2, AG=1, GG=0`. Miễn là nhất quán, model vẫn học được pattern, nhưng khi giải thích hệ số/feature importance phải biết đang đếm allele nào.
+
+Hai allele tại một SNP không phải là hai sợi của cùng một DNA double helix. Double helix gồm hai sợi bổ sung nhau, ví dụ `A` đi với `T`, `G` đi với `C`; đó là hai strand của cùng một bản sao DNA. Số hai allele đến từ việc dog là sinh vật diploid: ở autosome, dog có hai chromosome tương đồng, một bản từ bố và một bản từ mẹ. Mỗi bản chromosome có một allele tại cùng vị trí SNP. Nếu bản bố là `A` và bản mẹ là `G`, genotype là `AG`; nếu đang đếm `G`, dosage là `1`.
+
+### Q35. Row-wise interaction trong TabICL khác gì so với TabPFN?
+
+Row-wise interaction là một module được TabICL tách riêng: sau khi tạo cell embeddings theo từng cột, TabICL cho các feature/SNP trong cùng một row attention với nhau để tạo row embedding. Với một dog `[SNP_1, SNP_2, ..., SNP_56]`, bước này học các tương tác ngang như `SNP_1` kết hợp `SNP_2` hoặc nhóm SNP vùng ALX4 kết hợp các SNP khác. TabPFN không nhấn mạnh một bước row-wise interaction riêng như vậy. TabPFN thường mã hóa cả feature vector của một sample thành biểu diễn của sample rồi dùng Transformer/in-context learning để các train/test samples trao đổi thông tin trong context. Nói ngắn gọn: TabICL có pipeline rõ theo bảng `column-wise -> row-wise -> dataset-wise`, còn TabPFN gom feature row vào representation và tập trung hơn vào dataset-wise in-context prediction. Vì vậy TabICL dễ giải thích hơn ở mức "SNP trong cùng dog tương tác thế nào"; TabPFN dễ hiểu hơn như "test sample học từ train samples trong context".
+
+### Q36. `W_Q`, `W_K`, `W_V` là ma trận được pretrain của model à?
+
+Đúng, trong TabICL/TabPFN, `W_Q`, `W_K`, `W_V` là các ma trận weight đã học trong pretraining và được lưu trong checkpoint. Khi chạy trên dog dataset, model không tự tạo mới các ma trận này và cũng không cập nhật chúng bằng gradient; nó load checkpoint rồi dùng các ma trận đó để biến embedding thành query, key, value: `q_i = e_i W_Q`, `k_i = e_i W_K`, `v_i = e_i W_V`. Sau đó attention tính similarity `score_ij = q_i . k_j / sqrt(d)`, softmax thành trọng số, rồi lấy tổng có trọng số các `v_j`. Cần phân biệt: `W_Q/W_K/W_V` là parameters cố định sau pretraining, còn `q/k/v` là vector được tính ra khác nhau cho từng input dog/SNP/context. Trong một Transformer thật còn có nhiều layer và nhiều head, nên không chỉ có một bộ `W_Q/W_K/W_V`, mà có nhiều bộ cho từng layer/head.
+
 ## Phụ lục A. TabPFN - thuật toán có minh họa
 
 ### A1. TabPFN là gì?
