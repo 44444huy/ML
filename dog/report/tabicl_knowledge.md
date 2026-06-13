@@ -16,7 +16,7 @@ Project FDP-EVC dự đoán đặc điểm nhìn thấy được từ DNA.
 
 Dog eye dataset hiện tại:
 
-- `X`: ma trận genotype, kích thước khoảng `2769 dogs x 56 SNPs`.
+- `X`: ma trận genotype, kích thước khoảng `2769 dogs x 52 SNPs`.
 - `y`: nhãn nhị phân, `1 = blue eyes`, `0 = brown/non-blue eyes`.
 - Positive rate khoảng `3.9%`, nên đây là bài toán mất cân bằng mạnh.
 
@@ -732,7 +732,7 @@ Step 3 attention mask:
 
 TabNet tạo một mask `M_t` ở mỗi decision step `t`.
 
-Nếu input có 56 SNP:
+Nếu input có 52 SNP:
 
 ```text
 x = [x1, x2, x3, ..., x56]
@@ -929,7 +929,7 @@ dog_T = [SNP_1=0, SNP_2=2, SNP_ALX4=1, SNP_4=0, ...]
 TabNet hỏi:
 
 ```text
-"Trong 56 SNP của chính dog_T, SNP nào nên được nhìn nhiều?"
+"Trong 52 SNP của chính dog_T, SNP nào nên được nhìn nhiều?"
 ```
 
 Minh họa:

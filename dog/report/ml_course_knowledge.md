@@ -9,6 +9,10 @@ File này tóm tắt kiến thức từ các slide:
 - `L6-Random-forests-HauLD.pdf`
 - `L7-Neural-network-HauLD.pdf`
 - `L8-SVM-HauLD.pdf`
+- `L9-Model-assessment-HauLD (1).pdf`
+- `L10-prob-models-HauLD.pdf`
+- `L11-Data-mining-HauLD.pdf`
+- `L12-assoc-rules-HauLD.pdf`
 
 Mục tiêu của file này không chỉ là chép lại slide, mà là giải thích lại theo kiểu người mới học có thể đọc được:
 
@@ -29,6 +33,10 @@ L4-5 -> clustering, K-means, K-means++, hierarchical clustering, evaluation
 L6  -> decision tree, ID3, entropy, information gain, random forest
 L7  -> neural network, perceptron, gradient descent, backpropagation
 L8  -> SVM, margin, hard/soft margin, dual form, kernel trick
+L9  -> model assessment, hold-out, cross-validation, confusion matrix, F1, ROC/PR-AUC
+L10 -> probabilistic models, Bayes rule, MLE, MAP, Naive Bayes
+L11 -> data mining, KDD, data-information-knowledge, data types, challenges
+L12 -> association rules, support, confidence, lift, Apriori
 ```
 
 Nếu cần hiểu công thức, đọc chậm các phần:
@@ -43,6 +51,11 @@ L7.7  Backpropagation
 L8.4  Hard-margin SVM
 L8.6  Dual form
 L8.8  Kernel trick
+L9.13 Precision/Recall/F1
+L10.3 Bayes rule
+L10.5 MLE vs MAP
+L12.2 Support and confidence
+L12.5 Apriori principle
 ```
 
 ## Quy ước cập nhật Q&A
@@ -2268,6 +2281,1382 @@ C trong SVM càng lớn -> regularization càng yếu hơn theo nghĩa cho phép
 
 Chưa có câu hỏi riêng sau khi tạo file.
 
+# Lesson 9. Performance Evaluation
+
+Lesson này trả lời câu hỏi: sau khi train model, làm sao đánh giá model một cách đáng tin hơn thay vì chỉ nhìn cảm giác hoặc một lần chạy may rủi.
+
+Có 2 nhóm ý chính:
+
+```text
+Evaluation strategy:
+  chia data / lặp đánh giá / chọn model sao cho kết quả đáng tin.
+
+Evaluation measure:
+  dùng metric nào để đo chất lượng model.
+```
+
+## L9.1. Model assessment là gì?
+
+Model assessment là đánh giá hiệu năng của một model hoặc một phương pháp học máy dựa trên dataset quan sát được `D`.
+
+Vấn đề là ta không biết toàn bộ phân phối thật ngoài đời:
+
+```text
+Data thật ngoài đời: P_data(x, y)
+Dataset quan sát được: D = {(x_1, y_1), ..., (x_n, y_n)}
+```
+
+Ta muốn biết model có dự đoán tốt trên dữ liệu mới không, nhưng chỉ có `D`. Vì vậy ta phải dùng một phần dữ liệu để train, một phần dữ liệu chưa bị model nhìn thấy để test.
+
+Nguyên tắc quan trọng:
+
+```text
+Không dùng test set để train.
+Không dùng test set để chọn hyperparameter.
+Test set chỉ dùng ở cuối để báo cáo kết quả.
+```
+
+Nếu dùng test set để chọn model, kết quả sẽ bị lạc quan giả vì model đã bị "tune theo test".
+
+## L9.2. Hold-out
+
+Hold-out là cách chia dataset thành 2 phần không giao nhau:
+
+```text
+D = D_train ∪ D_test
+D_train ∩ D_test = ∅
+```
+
+Trong đó:
+
+```text
+D_train: dùng để train model
+D_test : dùng để đánh giá performance
+```
+
+Ví dụ:
+
+```text
+1000 dogs
+  700 dogs -> train
+  300 dogs -> test
+```
+
+Thuật toán:
+
+```text
+Input:
+  D: dataset
+  r: train ratio, ví dụ 0.8
+
+Steps:
+  1. Random shuffle D
+  2. Lấy r*n samples làm D_train
+  3. Lấy phần còn lại làm D_test
+  4. Train model trên D_train
+  5. Đánh giá model trên D_test
+```
+
+Ưu điểm:
+
+```text
+Nhanh, dễ làm, phù hợp khi dataset lớn.
+```
+
+Nhược điểm:
+
+```text
+Kết quả phụ thuộc vào một lần random split.
+Nếu dataset nhỏ hoặc mất cân bằng class, split có thể không đại diện.
+```
+
+## L9.3. Stratified sampling
+
+Stratified sampling là chia dữ liệu sao cho tỉ lệ class trong train/test gần giống tỉ lệ class trong dataset gốc.
+
+Ví dụ bài toán blue eye:
+
+```text
+Dataset gốc:
+  blue    = 20%
+  nonblue = 80%
+
+Split tốt:
+  train: blue 20%, nonblue 80%
+  test : blue 20%, nonblue 80%
+```
+
+Nếu random split thường, với dataset nhỏ có thể xảy ra:
+
+```text
+test set có quá ít blue dogs
+hoặc train set gần như không có blue dogs
+```
+
+Khi đó metric sẽ nhiễu và model học kém.
+
+Thuật toán stratified hold-out:
+
+```text
+Input:
+  D = D_0 ∪ D_1 ∪ ... ∪ D_C
+  D_c: toàn bộ samples thuộc class c
+
+For each class c:
+  1. Shuffle D_c
+  2. Chia D_c thành train part và test part theo cùng ratio
+
+D_train = union các train part
+D_test  = union các test part
+```
+
+Trong project, các split classification nên giữ class balance tương đối ổn, đặc biệt với phenotype hiếm như blue eye hoặc grey/blue coat.
+
+## L9.4. Repeated hold-out
+
+Repeated hold-out là chạy hold-out nhiều lần rồi lấy trung bình kết quả.
+
+```text
+For i = 1..R:
+  1. Random split D thành D_train_i, D_test_i
+  2. Train model trên D_train_i
+  3. Test trên D_test_i
+  4. Thu được metric p_i
+
+Final score:
+  p_mean = (p_1 + p_2 + ... + p_R) / R
+```
+
+Ý nghĩa:
+
+```text
+Một lần split có thể may/rủi.
+Nhiều lần split giúp ước lượng ổn định hơn.
+```
+
+Nhưng nhược điểm là các train/test set giữa các lần có thể overlap, và chi phí train tăng theo số lần lặp.
+
+## L9.5. K-fold cross-validation
+
+K-fold cross-validation chia dataset thành `K` phần không overlap:
+
+```text
+D = F_1 ∪ F_2 ∪ ... ∪ F_K
+F_i ∩ F_j = ∅ nếu i != j
+```
+
+Sau đó train/test `K` lần:
+
+```text
+Fold 1:
+  test = F_1
+  train = F_2 ∪ ... ∪ F_K
+
+Fold 2:
+  test = F_2
+  train = F_1 ∪ F_3 ∪ ... ∪ F_K
+
+...
+
+Fold K:
+  test = F_K
+  train = F_1 ∪ ... ∪ F_{K-1}
+```
+
+Metric cuối:
+
+```text
+p_cv = (p_1 + p_2 + ... + p_K) / K
+```
+
+Ví dụ `K=5`:
+
+```text
+Mỗi lần dùng 80% data train, 20% data validate.
+Sau 5 folds, mỗi sample được dùng làm validation đúng 1 lần.
+```
+
+Ưu điểm:
+
+```text
+Dùng dữ liệu hiệu quả hơn hold-out.
+Kết quả ổn định hơn một lần split.
+Phù hợp dataset nhỏ/vừa.
+```
+
+Nhược điểm:
+
+```text
+Tốn thời gian hơn vì phải train K lần.
+```
+
+Trong project, các baseline như LR/RF/MLP có thể dùng cross-validation trên train/validation để báo cáo CV hoặc tune model.
+
+## L9.6. Leave-one-out cross-validation
+
+Leave-one-out là trường hợp đặc biệt của K-fold:
+
+```text
+K = n
+```
+
+Mỗi fold chỉ có 1 sample làm test:
+
+```text
+For i = 1..n:
+  test = {x_i}
+  train = D \ {x_i}
+```
+
+Ưu điểm:
+
+```text
+Tận dụng dữ liệu tối đa.
+Không có random split.
+```
+
+Nhược điểm:
+
+```text
+Rất tốn thời gian vì phải train n lần.
+Metric có thể vẫn có variance cao nếu từng test fold chỉ có 1 sample.
+```
+
+Thường chỉ dùng khi dataset rất nhỏ và model train nhanh.
+
+## L9.7. Bootstrap sampling trong model assessment
+
+Bootstrap sampling là bốc mẫu có hoàn lại.
+
+Giả sử dataset:
+
+```text
+D = [dog_1, dog_2, dog_3, dog_4, dog_5]
+```
+
+Một bootstrap sample có cùng kích thước với `D`, nhưng được bốc with replacement:
+
+```text
+D_boot = [dog_2, dog_2, dog_4, dog_5, dog_1]
+```
+
+Nghĩa là:
+
+```text
+Một sample có thể xuất hiện nhiều lần.
+Một sample khác có thể không xuất hiện.
+```
+
+Thuật toán bootstrap assessment:
+
+```text
+Input:
+  D có n samples
+
+For b = 1..B:
+  1. Tạo D_train_b bằng cách sample n lần từ D với replacement
+  2. D_test_b = các samples trong D không xuất hiện trong D_train_b
+  3. Train model trên D_train_b
+  4. Test model trên D_test_b
+  5. Lưu metric p_b
+
+Final:
+  p_boot = mean(p_1, ..., p_B)
+```
+
+Vì sao khoảng 63.2% sample khác nhau xuất hiện trong bootstrap train?
+
+Với một sample `x_i`, xác suất nó không được chọn trong một lần bốc là:
+
+```text
+P(not chosen in one draw) = 1 - 1/n
+```
+
+Bootstrap bốc `n` lần, nên xác suất `x_i` không xuất hiện lần nào:
+
+```text
+P(x_i absent) = (1 - 1/n)^n
+```
+
+Khi `n` lớn:
+
+```text
+(1 - 1/n)^n ≈ e^(-1) ≈ 0.368
+```
+
+Vậy xác suất `x_i` xuất hiện ít nhất một lần:
+
+```text
+P(x_i present) = 1 - 0.368 = 0.632
+```
+
+Nên trung bình:
+
+```text
+63.2% unique samples xuất hiện trong bootstrap train
+36.8% samples còn lại là out-of-bag/test
+```
+
+Bootstrap phù hợp khi dataset nhỏ, vì nó tạo được nhiều training subsets khác nhau từ cùng dataset gốc.
+
+## L9.8. Bootstrap trong Random Forest khác bootstrap assessment thế nào?
+
+Cùng là bootstrap sampling, nhưng mục đích khác nhau.
+
+```text
+Bootstrap trong Random Forest:
+  dùng để train nhiều cây khác nhau trong một model ensemble.
+
+Bootstrap trong model assessment:
+  dùng để ước lượng performance/uncertainty của model.
+```
+
+Random Forest:
+
+```text
+For each tree t:
+  1. Tạo bootstrap sample D_t từ training data
+  2. Train tree T_t trên D_t
+  3. Khi predict, nhiều tree vote/average với nhau
+```
+
+Bootstrap assessment:
+
+```text
+For each bootstrap round b:
+  1. Tạo train/test split bằng bootstrap
+  2. Train model
+  3. Tính metric
+  4. Lấy trung bình metric sau nhiều vòng
+```
+
+Vì vậy không nên nói chung chung "model dùng bootstrap" mà cần nói rõ:
+
+```text
+Bootstrap dùng bên trong thuật toán train?
+hay bootstrap dùng để đánh giá performance?
+```
+
+## L9.9. Model selection
+
+Model selection là chọn hyperparameter tốt.
+
+Ví dụ:
+
+```text
+Ridge regression:
+  chọn lambda
+
+SVM:
+  chọn C, kernel, gamma
+
+Random Forest:
+  chọn number of trees, max depth, max features
+
+MLP:
+  chọn hidden size, learning rate, dropout, weight decay
+```
+
+Cách hold-out validation:
+
+```text
+Input:
+  D
+  S = {lambda_1, lambda_2, ..., lambda_m}
+  metric P
+
+Steps:
+  1. Split D thành D_train và D_valid
+  2. For each lambda in S:
+       train model trên D_train với lambda
+       tính P_lambda trên D_valid
+  3. Chọn lambda* có P_lambda tốt nhất
+  4. Train lại model với lambda* trên toàn bộ train data
+```
+
+Điểm quan trọng:
+
+```text
+Validation set dùng để chọn hyperparameter.
+Test set không được dùng để chọn hyperparameter.
+```
+
+Nếu có đủ dữ liệu, quy trình đúng là:
+
+```text
+D_train: train weights
+D_valid: chọn hyperparameter / threshold
+D_test : báo cáo final performance
+```
+
+## L9.10. Model assessment + model selection
+
+Khi vừa cần chọn hyperparameter vừa cần báo cáo kết quả cuối, ta nên tách 3 phần:
+
+```text
+D = D_train ∪ D_valid ∪ D_test
+```
+
+Quy trình:
+
+```text
+Input:
+  S: tập hyperparameters cần thử
+  P: metric dùng để chọn model
+
+For each hyperparameter setting s in S:
+  1. Train model trên D_train với s
+  2. Evaluate trên D_valid
+  3. Lưu P_s
+
+Select:
+  s* = argmax_s P_s
+
+Final training:
+  train model trên D_train ∪ D_valid với s*
+
+Final assessment:
+  evaluate một lần trên D_test
+```
+
+Trong project dog, cách hiểu tương ứng:
+
+```text
+train/valid:
+  dùng để train model, tune hyperparameter, chọn threshold.
+
+test:
+  dùng để báo cáo PR-AUC, ROC-AUC, F1 cuối cùng.
+```
+
+## L9.11. Accuracy
+
+Accuracy là tỉ lệ dự đoán đúng:
+
+```text
+Accuracy = số dự đoán đúng / tổng số samples
+```
+
+Với binary classification:
+
+```text
+Accuracy = (TP + TN) / (TP + TN + FP + FN)
+```
+
+Trong đó:
+
+```text
+TP: true positive  - dự đoán positive đúng
+TN: true negative  - dự đoán negative đúng
+FP: false positive - dự đoán positive sai
+FN: false negative - dự đoán negative sai
+```
+
+Vấn đề của accuracy với imbalanced data:
+
+```text
+Nếu 95% dogs là non-blue,
+model luôn đoán non-blue sẽ có accuracy 95%,
+nhưng thật ra không học được blue eye.
+```
+
+Vì vậy với phenotype hiếm, project ưu tiên thêm PR-AUC, ROC-AUC, F1 thay vì chỉ nhìn accuracy.
+
+## L9.12. Confusion matrix
+
+Confusion matrix cho biết model nhầm class nào sang class nào.
+
+Binary case:
+
+```text
+                 Pred positive   Pred negative
+True positive         TP              FN
+True negative         FP              TN
+```
+
+Multiclass case:
+
+```text
+M[row=true class, col=predicted class]
+```
+
+Ví dụ:
+
+```text
+                 Pred brown   Pred blue
+True brown           80          20
+True blue            10          40
+```
+
+Diễn giải:
+
+```text
+80 brown dogs được dự đoán đúng là brown.
+40 blue dogs được dự đoán đúng là blue.
+20 brown dogs bị nhầm thành blue.
+10 blue dogs bị nhầm thành brown.
+```
+
+## L9.13. Precision và Recall
+
+Precision trả lời:
+
+```text
+Trong các sample model dự đoán là positive, bao nhiêu cái thật sự positive?
+```
+
+Công thức:
+
+```text
+Precision = TP / (TP + FP)
+```
+
+Recall trả lời:
+
+```text
+Trong các positive thật, model tìm được bao nhiêu cái?
+```
+
+Công thức:
+
+```text
+Recall = TP / (TP + FN)
+```
+
+Ví dụ blue eye:
+
+```text
+TP = 40  blue dự đoán đúng blue
+FP = 20  non-blue bị dự đoán nhầm thành blue
+FN = 10  blue bị bỏ sót
+```
+
+Thì:
+
+```text
+Precision = 40 / (40 + 20) = 0.667
+Recall    = 40 / (40 + 10) = 0.800
+```
+
+Ý nghĩa:
+
+```text
+Precision cao:
+  đã dự đoán blue thì thường đúng.
+
+Recall cao:
+  ít bỏ sót blue dogs.
+```
+
+## L9.14. Micro-average và macro-average
+
+Với multiclass classification, mỗi class có precision/recall riêng. Cần cách gộp lại.
+
+Micro-average:
+
+```text
+Precision_micro = sum_c TP_c / sum_c (TP_c + FP_c)
+Recall_micro    = sum_c TP_c / sum_c (TP_c + FN_c)
+```
+
+Micro coi mọi prediction như nhau, nên class nhiều samples ảnh hưởng mạnh hơn.
+
+Macro-average:
+
+```text
+Precision_macro = (1/C) * sum_c Precision_c
+Recall_macro    = (1/C) * sum_c Recall_c
+```
+
+Macro coi mỗi class quan trọng như nhau, nên class nhỏ/hiếm cũng có tiếng nói ngang class lớn.
+
+Với imbalanced data:
+
+```text
+Micro có thể bị class lớn chi phối.
+Macro nhạy hơn với class nhỏ.
+```
+
+## L9.15. F1-score
+
+F1 là harmonic mean của precision và recall:
+
+```text
+F1 = 2 * Precision * Recall / (Precision + Recall)
+```
+
+Tương đương:
+
+```text
+F1 = 2 / (1/Precision + 1/Recall)
+```
+
+F1 thấp nếu một trong hai precision/recall thấp.
+
+Ví dụ:
+
+```text
+Precision = 0.90
+Recall    = 0.10
+
+F1 = 2 * 0.90 * 0.10 / (0.90 + 0.10)
+   = 0.18
+```
+
+Dù precision cao, model bỏ sót quá nhiều positive nên F1 vẫn thấp.
+
+Trong project, F1 phụ thuộc vào threshold:
+
+```text
+y_prob >= threshold -> predict positive
+y_prob <  threshold -> predict negative
+```
+
+Vì vậy threshold tốt có thể làm F1 tăng đáng kể.
+
+## L9.16. ROC-AUC và PR-AUC
+
+Nhiều model không chỉ trả label, mà trả probability:
+
+```text
+P(blue | dog) = 0.73
+```
+
+Muốn đổi probability thành label, cần threshold:
+
+```text
+P >= threshold -> blue
+P <  threshold -> non-blue
+```
+
+ROC curve dùng:
+
+```text
+TPR = Recall = TP / (TP + FN)
+FPR = FP / (FP + TN)
+```
+
+ROC-AUC đo khả năng model xếp positive cao hơn negative trên nhiều thresholds.
+
+PR curve dùng:
+
+```text
+Precision = TP / (TP + FP)
+Recall    = TP / (TP + FN)
+```
+
+PR-AUC đặc biệt hữu ích khi positive class hiếm, vì nó tập trung vào chất lượng dự đoán positive.
+
+Với phenotype hiếm như blue eye hoặc grey/blue coat:
+
+```text
+PR-AUC thường đáng chú ý hơn accuracy.
+```
+
+## L9.17. Threshold selection
+
+Một model có thể cho probability tốt nhưng threshold `0.5` chưa chắc tối ưu.
+
+### Youden's J cho ROC
+
+Youden's J:
+
+```text
+J = Sensitivity + Specificity - 1
+```
+
+Vì:
+
+```text
+Sensitivity = TPR
+Specificity = 1 - FPR
+```
+
+Nên:
+
+```text
+J = TPR - FPR
+```
+
+Chọn threshold:
+
+```text
+threshold* = argmax_threshold (TPR - FPR)
+```
+
+### F1-based threshold cho PR
+
+Nếu mục tiêu là cân bằng precision và recall:
+
+```text
+For each threshold t:
+  y_pred_t = (y_prob >= t)
+  F1_t = F1(y_true, y_pred_t)
+
+threshold* = argmax_t F1_t
+```
+
+Trong project dog, một số model chọn threshold theo validation set để tối ưu F1. Không được chọn threshold bằng test set, vì như vậy là leak thông tin test.
+
+## L9.18. Liên hệ với project: có dùng bootstrap sampling không?
+
+Có, nhưng chỉ dùng gián tiếp trong Random Forest, không phải dùng bootstrap để đánh giá metric.
+
+Trong project có các chỗ dùng:
+
+```text
+sklearn.ensemble.RandomForestClassifier
+```
+
+Trong sklearn, `RandomForestClassifier` mặc định:
+
+```text
+bootstrap=True
+```
+
+Nên mỗi cây trong Random Forest được train trên một bootstrap sample khác nhau.
+
+Ví dụ:
+
+```text
+Dataset gốc:
+  D = [dog1, dog2, dog3, dog4, dog5]
+
+Tree 1 có thể train trên:
+  [dog2, dog2, dog4, dog5, dog1]
+
+Tree 2 có thể train trên:
+  [dog3, dog1, dog1, dog5, dog5]
+```
+
+Với dog eye/coat Random Forest còn có:
+
+```text
+class_weight = "balanced_subsample"
+```
+
+Ý nghĩa:
+
+```text
+class weight được tính lại trên bootstrap sample của từng tree.
+```
+
+Tóm tắt theo model trong project:
+
+```text
+Random Forest:
+  có bootstrap sampling bên trong quá trình train từng tree.
+
+MLP:
+  không dùng bootstrap sampling.
+
+Logistic Regression:
+  không dùng bootstrap sampling.
+
+SVM:
+  không dùng bootstrap sampling.
+
+TabNet:
+  không dùng bootstrap sampling theo kiểu Random Forest.
+
+TabPFN:
+  không dùng bootstrap sampling trong pipeline project.
+
+TabICL:
+  không dùng bootstrap sampling trong pipeline project.
+```
+
+Quan trọng:
+
+```text
+Project hiện chưa dùng bootstrap assessment / bootstrap confidence interval.
+Project chủ yếu dùng train/valid/test split, cross-validation, và test metrics.
+```
+
+## L9 Q&A log
+
+### Q1. Trong project mình có dùng bootstrap sampling không?
+
+Có, nhưng chỉ trong Random Forest. Vì project dùng `RandomForestClassifier` của sklearn và mặc định `bootstrap=True`, mỗi decision tree trong forest được train trên một bootstrap sample của training data. Đây là bootstrap dùng để tạo diversity giữa các cây.
+
+Nhưng project chưa dùng bootstrap sampling để đánh giá metric. Nghĩa là các chỉ số như PR-AUC, ROC-AUC, F1 hiện được báo cáo từ split/CV/test set, không phải từ bootstrap confidence interval.
+
+### Q2. Bootstrap sampling trong Random Forest có giống model assessment không?
+
+Không hoàn toàn giống. Bootstrap trong Random Forest là một phần của thuật toán train ensemble: mỗi tree thấy một sample khác nhau để giảm overfitting khi vote/average. Bootstrap trong model assessment là chiến lược đánh giá: tạo nhiều train/test bootstrap rounds để ước lượng performance ổn định hơn hoặc confidence interval.
+
+# Lesson 10. Probabilistic Models
+
+Lesson này trả lời câu hỏi: nếu model không chỉ đưa ra một nhãn, mà còn muốn nói "xác suất nhãn này là bao nhiêu", thì ta mô hình hóa thế nào?
+
+Ý chính:
+
+```text
+Probabilistic model = mô hình học máy dựa trên xác suất.
+
+Learning  -> học tham số từ dữ liệu.
+Inference -> dùng model đã học để suy luận / dự đoán.
+```
+
+## L10.1. Biến ngẫu nhiên, sự kiện, xác suất
+
+Một biến ngẫu nhiên biểu diễn một đại lượng chưa biết chắc.
+
+Ví dụ:
+
+```text
+Y = Buy_computer
+Y có thể nhận {yes, no}
+```
+
+Một sự kiện là một mệnh đề có thể đúng hoặc sai.
+
+```text
+A = "khách hàng mua máy tính"
+P(A) = xác suất sự kiện A xảy ra
+```
+
+Nếu biến/sự kiện quan sát được trong thực tế, ta gọi là observed variable.
+Nếu biến không quan sát trực tiếp nhưng có ảnh hưởng đến dữ liệu, ta gọi là hidden/latent variable.
+
+## L10.2. Joint probability và conditional probability
+
+Joint probability:
+
+```text
+P(A, B)
+```
+
+nghĩa là xác suất cả A và B cùng xảy ra.
+
+Conditional probability:
+
+```text
+P(A | B) = P(A, B) / P(B)
+```
+
+nghĩa là xác suất A xảy ra khi đã biết B xảy ra.
+
+Từ đó có product rule:
+
+```text
+P(A, B) = P(A | B) P(B)
+```
+
+## L10.3. Bayes rule
+
+Bayes rule:
+
+```text
+P(H | D) = P(D | H) P(H) / P(D)
+```
+
+Trong đó:
+
+```text
+H       = hypothesis/model/class
+D       = observed data
+P(H)    = prior
+P(D|H)  = likelihood
+P(H|D)  = posterior
+P(D)    = evidence
+```
+
+Trong classification:
+
+```text
+P(class | attributes)
+```
+
+là posterior probability. Đây là thứ Bayes classifier muốn tính.
+
+Vì `P(D)` giống nhau cho mọi class khi so sánh, ta thường dùng:
+
+```text
+class* = argmax_c P(D | c) P(c)
+```
+
+## L10.4. Probabilistic model: model, inference, learning
+
+Một probabilistic model nói rằng dữ liệu được sinh ra theo một phân phối nào đó.
+
+Có 2 việc chính:
+
+```text
+Learning:
+  học tham số của phân phối từ training data.
+
+Inference:
+  sau khi có tham số, tính xác suất hoặc dự đoán cho dữ liệu mới.
+```
+
+Ví dụ:
+
+```text
+Learning:
+  học mean/variance của Gaussian cho từng class.
+
+Inference:
+  với x mới, tính class nào có posterior cao nhất.
+```
+
+## L10.5. Maximum Likelihood Estimation - MLE
+
+MLE học tham số bằng cách chọn tham số làm dữ liệu quan sát được có xác suất cao nhất.
+
+```text
+theta_MLE = argmax_theta P(D | theta)
+```
+
+Nếu dữ liệu độc lập:
+
+```text
+P(D | theta) = product_i P(x_i | theta)
+```
+
+Để dễ tính, dùng log:
+
+```text
+theta_MLE = argmax_theta sum_i log P(x_i | theta)
+```
+
+Vì log là hàm tăng đơn điệu nên vị trí argmax không đổi.
+
+Nhớ bẫy:
+
+```text
+MLE trực tiếp dùng để học model/parameters từ training dataset.
+Prediction là bước dùng model sau khi đã học xong.
+```
+
+## L10.6. Maximum A Posteriori - MAP
+
+MAP giống MLE nhưng có thêm prior về tham số.
+
+```text
+theta_MAP = argmax_theta P(theta | D)
+```
+
+Dùng Bayes rule:
+
+```text
+theta_MAP = argmax_theta P(D | theta) P(theta)
+```
+
+So sánh:
+
+```text
+MLE: chỉ dùng likelihood P(D | theta)
+MAP: dùng likelihood P(D | theta) và prior P(theta)
+```
+
+MAP không ước lượng toàn bộ posterior distribution. Nó chỉ lấy một point estimate tốt nhất, tức mode của posterior.
+
+## L10.7. Naive Bayes
+
+Naive Bayes dùng Bayes rule và giả định các feature độc lập có điều kiện theo class.
+
+Giả sử:
+
+```text
+x = (x1, x2, ..., xd)
+```
+
+Naive assumption:
+
+```text
+P(x | c) = P(x1 | c) P(x2 | c) ... P(xd | c)
+```
+
+Prediction:
+
+```text
+c* = argmax_c P(c) product_j P(xj | c)
+```
+
+Dùng log để tránh underflow:
+
+```text
+c* = argmax_c log P(c) + sum_j log P(xj | c)
+```
+
+Các biến thể thường gặp:
+
+```text
+Gaussian Naive Bayes:
+  feature liên tục, giả sử theo Gaussian.
+
+Multinomial Naive Bayes:
+  feature dạng count, hay dùng cho text.
+
+Bernoulli Naive Bayes:
+  feature nhị phân.
+```
+
+## L10 Q&A log
+
+### Q1. Posterior probability là gì?
+
+Posterior probability là xác suất của model/class/hypothesis sau khi đã quan sát dữ liệu:
+
+```text
+P(class | data)
+```
+
+Nó khác likelihood:
+
+```text
+P(data | class)
+```
+
+### Q2. Bayesian classification dựa trên tần suất hay posterior?
+
+Bản chất là posterior probability. Tần suất trong training set chỉ là cách ước lượng các xác suất thành phần như `P(feature | class)`.
+
+# Lesson 11. Basics of Data Mining
+
+Lesson này trả lời câu hỏi: data mining là gì, khác gì với preprocessing, và vì sao cần khai phá tri thức từ dữ liệu lớn.
+
+## L11.1. Data, information, knowledge, meta-knowledge
+
+Có thể hiểu theo tầng:
+
+```text
+Data:
+  dữ liệu thô, nhiều nhưng ít ý nghĩa nếu đứng một mình.
+
+Information:
+  dữ liệu đã có ngữ cảnh.
+
+Knowledge:
+  tri thức/rule/pattern có thể dùng để ra quyết định.
+
+Meta-knowledge:
+  tri thức về chính tri thức, ví dụ rule nào đáng tin hơn.
+```
+
+Ví dụ:
+
+```text
+Data:
+  6954, 46, 412, 2588
+
+Information:
+  đây là các ô trong confusion matrix.
+
+Knowledge:
+  accuracy = (6954 + 2588) / 10000 = 95.42%.
+```
+
+## L11.2. Knowledge Discovery in Databases - KDD
+
+KDD là quá trình khám phá tri thức từ dữ liệu.
+
+Một pipeline thường gặp:
+
+```text
+Data collection
+-> Cleaning
+-> Integration
+-> Transformation
+-> Data mining
+-> Pattern evaluation
+-> Knowledge presentation
+```
+
+Data mining là một bước trong KDD, không phải toàn bộ KDD.
+
+## L11.3. Data mining task là gì?
+
+Các bài toán thường gặp:
+
+```text
+Classification:
+  dự đoán nhãn rời rạc.
+
+Regression:
+  dự đoán giá trị số liên tục.
+
+Clustering:
+  gom nhóm dữ liệu chưa có nhãn.
+
+Association rule mining:
+  tìm luật đồng xuất hiện X -> Y.
+
+Exploration:
+  khám phá phân phối / pattern ban đầu.
+```
+
+Data transformation thường là preprocessing, không phải data mining task chính.
+
+## L11.4. Data types
+
+Structured data:
+
+```text
+table, relational database, spreadsheet
+```
+
+Unstructured data:
+
+```text
+text, image, video, audio, DNA sequence
+```
+
+Semi-structured data:
+
+```text
+JSON, XML, log file
+```
+
+Mỗi loại dữ liệu cần cách biểu diễn feature khác nhau.
+
+## L11.5. Challenges
+
+Volume:
+
+```text
+dữ liệu rất lớn, khó lưu và tính toán.
+```
+
+Variety:
+
+```text
+dữ liệu nhiều kiểu: bảng, text, ảnh, chuỗi, graph.
+```
+
+Veracity:
+
+```text
+dữ liệu nhiễu, thiếu, sai, không nhất quán.
+```
+
+Velocity:
+
+```text
+dữ liệu đến nhanh, cần xử lý gần realtime.
+```
+
+## L11.6. Các bẫy hay gặp
+
+Cluster:
+
+```text
+một nhóm các object giống nhau trong cùng nhóm
+và khác đáng kể với object ở nhóm khác.
+```
+
+Knowledge discovery:
+
+```text
+quá trình tạo/extract tri thức từ dataset.
+```
+
+Data preprocessing:
+
+```text
+biến đổi raw data thành dạng phù hợp cho analysis/modeling.
+```
+
+## L11 Q&A log
+
+### Q1. Data transformation có phải data mining task không?
+
+Thường không. Nó là bước preprocessing để chuẩn bị dữ liệu cho mining/modeling.
+
+### Q2. Cluster là gì?
+
+Cluster là nhóm các object tương tự nhau và khác đáng kể với object ở nhóm khác.
+
+# Lesson 12. Association Rule Mining
+
+Lesson này trả lời câu hỏi: làm sao tìm các item thường xuất hiện cùng nhau và sinh luật kiểu `X -> Y`.
+
+## L12.1. Transaction database và itemset
+
+Transaction database gồm nhiều transaction.
+
+Ví dụ:
+
+```text
+T1 = {Bread, Milk}
+T2 = {Beer, Diaper}
+T3 = {Bread, Milk, Diaper}
+```
+
+Itemset là một tập item.
+
+```text
+{Bread, Milk}
+```
+
+`k-itemset` là itemset có `k` items.
+
+```text
+{Bread, Milk} là 2-itemset.
+```
+
+## L12.2. Support count và support
+
+Support count:
+
+```text
+support_count(A) = số transaction chứa A
+```
+
+Support:
+
+```text
+support(A) = support_count(A) / tổng số transaction
+```
+
+Bẫy:
+
+```text
+support count là số lượng.
+support là tỉ lệ.
+```
+
+Frequent itemset:
+
+```text
+support(A) >= minsup
+```
+
+## L12.3. Association rule
+
+Một association rule có dạng:
+
+```text
+X -> Y
+```
+
+Trong đó:
+
+```text
+X và Y là itemsets
+X giao Y = rỗng
+```
+
+Ý nghĩa:
+
+```text
+nếu transaction chứa X, nó có xu hướng chứa Y.
+```
+
+## L12.4. Confidence và lift
+
+Confidence:
+
+```text
+confidence(X -> Y) = support(X union Y) / support(X)
+```
+
+Nghĩa là trong số transaction chứa `X`, có bao nhiêu phần cũng chứa `Y`.
+
+Lift:
+
+```text
+lift(X -> Y) = confidence(X -> Y) / support(Y)
+```
+
+Diễn giải:
+
+```text
+lift > 1:
+  X và Y có liên hệ dương.
+
+lift = 1:
+  gần như độc lập.
+
+lift < 1:
+  liên hệ âm.
+```
+
+## L12.5. Apriori principle
+
+Apriori principle:
+
+```text
+Nếu một itemset là frequent,
+thì mọi subset của nó cũng phải frequent.
+```
+
+Dạng dùng để prune:
+
+```text
+Nếu một itemset là infrequent,
+thì mọi superset của nó chắc chắn infrequent.
+```
+
+Ví dụ:
+
+```text
+{Bread, Milk} không frequent
+=> {Bread, Milk, Diaper} không thể frequent.
+```
+
+## L12.6. Apriori algorithm
+
+Ý tưởng chạy theo level:
+
+```text
+1-itemsets -> 2-itemsets -> 3-itemsets -> ...
+```
+
+Thuật toán:
+
+```text
+1. Tìm frequent 1-itemsets.
+2. Sinh candidate 2-itemsets.
+3. Đếm support và giữ lại itemsets >= minsup.
+4. Sinh candidate 3-itemsets từ frequent 2-itemsets.
+5. Prune candidate nếu có subset không frequent.
+6. Lặp đến khi không sinh thêm được frequent itemset.
+7. Từ frequent itemsets, sinh association rules có confidence >= minconf.
+```
+
+## L12.7. Candidate generation bottleneck
+
+Apriori có bottleneck lớn ở candidate generation.
+
+Nếu có `n` frequent 1-items, số cặp 2-itemsets có thể là:
+
+```text
+n(n - 1) / 2
+```
+
+Vì vậy bước 2-itemsets có thể rất nặng do số cặp cần đếm support lớn.
+
+Số vòng lặp của Apriori tăng theo kích thước của frequent itemset lớn nhất.
+
+## L12.8. Item price có ảnh hưởng Apriori chuẩn không?
+
+Apriori chuẩn chỉ dùng việc item có xuất hiện trong transaction hay không.
+
+Nó không dùng giá tiền.
+
+Giá tiền chỉ ảnh hưởng nếu bài toán đổi sang:
+
+```text
+weighted association rule mining
+utility mining
+```
+
+## L12 Q&A log
+
+### Q1. Support count của itemset A là gì?
+
+Là tổng số transaction chứa A.
+
+### Q2. Apriori dùng minsup và minconf như thế nào?
+
+Apriori prune itemsets có support dưới `minsup`, rồi sinh rules có confidence ít nhất bằng `minconf`.
+
+### Q3. Bottleneck nghiêm trọng của Apriori là gì?
+
+Candidate generation, vì số lượng candidate itemsets có thể rất lớn.
+
 # Cross-Lesson Map
 
 ## Model nào thuộc lesson nào?
@@ -2278,6 +3667,10 @@ K-means / Hierarchical / DBSCAN   -> L4-5
 Decision Tree / Random Forest     -> L6
 MLP / Neural Network              -> L7
 SVM                               -> L8
+Model assessment / metrics / CV   -> L9
+Bayes / Naive Bayes / MLE / MAP   -> L10
+KDD / Data Mining basics          -> L11
+Association rules / Apriori       -> L12
 ```
 
 ## Công thức loss quan trọng
@@ -2297,6 +3690,37 @@ Neural network squared error:
 
 SVM hinge loss:
   max(0, 1 - y_i(<w,x_i> + b))
+```
+
+## Công thức xác suất và luật kết hợp quan trọng
+
+```text
+Conditional probability:
+  P(A | B) = P(A, B) / P(B)
+
+Bayes rule:
+  P(H | D) = P(D | H)P(H) / P(D)
+
+MLE:
+  theta_MLE = argmax_theta P(D | theta)
+
+MAP:
+  theta_MAP = argmax_theta P(D | theta)P(theta)
+
+Naive Bayes:
+  c* = argmax_c P(c) product_j P(x_j | c)
+
+Support count:
+  support_count(A) = number of transactions containing A
+
+Support:
+  support(A) = support_count(A) / total transactions
+
+Confidence:
+  confidence(X -> Y) = support(X union Y) / support(X)
+
+Lift:
+  lift(X -> Y) = confidence(X -> Y) / support(Y)
 ```
 
 ## Thuật toán train theo kiểu nào?
@@ -2325,6 +3749,12 @@ Neural Network:
 
 SVM:
   constrained convex optimization / dual quadratic programming
+
+Probabilistic models:
+  MLE/MAP / Bayes rule / posterior inference
+
+Apriori:
+  level-wise frequent itemset mining + pruning by Apriori principle
 ```
 
 ## Liên hệ với project dog eye color

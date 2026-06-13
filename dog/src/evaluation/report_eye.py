@@ -45,23 +45,33 @@ os.environ.setdefault("TABPFN_MODEL_CACHE_DIR", str(MODEL_CACHE_DIR / "tabpfn"))
 
 
 def load_all() -> dict:
+    bundle_mtime = NPZ_PATH.stat().st_mtime
+
+    def load_optional(path: Path, name: str):
+        if not path.exists():
+            return None
+        if path.stat().st_mtime < bundle_mtime:
+            print(f"[report_eye] skipping stale {name}: {path.name}")
+            return None
+        return json.loads(path.read_text())
+
     base = json.loads((EXP_DIR / "baseline_results.json").read_text())
     out: dict = {**base}
     out["MLP"] = json.loads((EXP_DIR / "mlp_results.json").read_text())
     # Tuned MLP from hyperparameter grid search (if it exists)
-    mlp_tuned_path = EXP_DIR / "mlp_best_results.json"
-    if mlp_tuned_path.exists():
-        out["MLP (tuned)"] = json.loads(mlp_tuned_path.read_text())
+    mlp_tuned = load_optional(EXP_DIR / "mlp_best_results.json", "MLP (tuned)")
+    if mlp_tuned is not None:
+        out["MLP (tuned)"] = mlp_tuned
     # Optional: deep-learning tabular models (only if their JSON exists)
-    tabpfn_path = EXP_DIR / "tabpfn_results.json"
-    if tabpfn_path.exists():
-        out["TabPFN"] = json.loads(tabpfn_path.read_text())
-    tabicl_path = EXP_DIR / "tabicl_results.json"
-    if tabicl_path.exists():
-        out["TabICL"] = json.loads(tabicl_path.read_text())
-    tabnet_path = EXP_DIR / "tabnet_results.json"
-    if tabnet_path.exists():
-        out["TabNet"] = json.loads(tabnet_path.read_text())
+    tabpfn = load_optional(EXP_DIR / "tabpfn_results.json", "TabPFN")
+    if tabpfn is not None:
+        out["TabPFN"] = tabpfn
+    tabicl = load_optional(EXP_DIR / "tabicl_results.json", "TabICL")
+    if tabicl is not None:
+        out["TabICL"] = tabicl
+    tabnet = load_optional(EXP_DIR / "tabnet_results.json", "TabNet")
+    if tabnet is not None:
+        out["TabNet"] = tabnet
     return out
 
 
@@ -240,6 +250,7 @@ def _probs_tabnet(X_tv, y_tv, idx_tr, idx_va, X_te, device):
 
 
 def plot_pr_curves(X: np.ndarray, y: np.ndarray, splits: dict, device,
+                   include_methods: set[str],
                    include_deep: bool = True) -> None:
     """Plot test PR curves for every model in the comparison."""
     fig, ax = plt.subplots(figsize=(7.5, 5.5))
@@ -267,7 +278,7 @@ def plot_pr_curves(X: np.ndarray, y: np.ndarray, splits: dict, device,
 
     # MLP (tuned) — uses hyperparameters from grid search
     tuned_path = EXP_DIR / "mlp_best_results.json"
-    if tuned_path.exists():
+    if "MLP (tuned)" in include_methods and tuned_path.exists():
         try:
             print("[plot] MLP (tuned) ...")
             hp = json.loads(tuned_path.read_text())["hyperparameters"]
@@ -279,25 +290,28 @@ def plot_pr_curves(X: np.ndarray, y: np.ndarray, splits: dict, device,
             print(f"[plot] skipping MLP (tuned): {e}")
 
     if include_deep:
-        try:
-            print("[plot] TabPFN ...")
-            curves.append(("TabPFN", _probs_tabpfn(X_tv, y_tv, X_te, device),
-                           "tab:red", "-"))
-        except Exception as e:
-            print(f"[plot] skipping TabPFN: {e}")
-        try:
-            print("[plot] TabICL ...")
-            curves.append(("TabICL", _probs_tabicl(X_tv, y_tv, X_te, device),
-                           "tab:orange", "-"))
-        except Exception as e:
-            print(f"[plot] skipping TabICL: {e}")
-        try:
-            print("[plot] TabNet ...")
-            curves.append(("TabNet", _probs_tabnet(X_tv, y_tv, idx_tr, idx_va,
-                                                   X_te, device),
-                           "tab:green", "-"))
-        except Exception as e:
-            print(f"[plot] skipping TabNet: {e}")
+        if "TabPFN" in include_methods:
+            try:
+                print("[plot] TabPFN ...")
+                curves.append(("TabPFN", _probs_tabpfn(X_tv, y_tv, X_te, device),
+                               "tab:red", "-"))
+            except Exception as e:
+                print(f"[plot] skipping TabPFN: {e}")
+        if "TabICL" in include_methods:
+            try:
+                print("[plot] TabICL ...")
+                curves.append(("TabICL", _probs_tabicl(X_tv, y_tv, X_te, device),
+                               "tab:orange", "-"))
+            except Exception as e:
+                print(f"[plot] skipping TabICL: {e}")
+        if "TabNet" in include_methods:
+            try:
+                print("[plot] TabNet ...")
+                curves.append(("TabNet", _probs_tabnet(X_tv, y_tv, idx_tr, idx_va,
+                                                       X_te, device),
+                               "tab:green", "-"))
+            except Exception as e:
+                print(f"[plot] skipping TabNet: {e}")
 
     from sklearn.metrics import average_precision_score
     for name, prob, color, ls in curves:
@@ -329,7 +343,7 @@ def main() -> int:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     plot_metric_bars(all_res)
-    plot_pr_curves(X, y, splits, device)
+    plot_pr_curves(X, y, splits, device, include_methods=set(all_res))
 
     parts = [
         "# Dog Eye Color — Method & Results",
@@ -351,14 +365,14 @@ def main() -> int:
         "## Proposed method",
         "",
         f"1. **GWAS-informed feature selection.** Keep only SNPs that pass "
-        f"the Bonferroni cutoff used by Deane-Coe et al. 2018 on this "
-        f"same dataset, `p_wald < 1.15e-7` (= 0.05 / ~430k QC-passed "
-        f"markers). On this dataset that gives **{bundle['X'].shape[1]} "
+        f"the genome-wide significance threshold reported by Deane-Coe "
+        f"et al. 2018, `p_wald < 5e-8`. On this dataset that gives "
+        f"**{bundle['X'].shape[1]} "
         f"SNPs**, almost all on chr18 in the ALX4 region the original "
         f"paper identified as the cause of blue eyes. Re-using the "
-        f"reference paper's exact threshold is more defensible than "
-        f"picking K by hand and is appropriate here because the trait "
-        f"is oligogenic (one dominant locus, p ≈ 1.3e-68).",
+        f"paper-reported threshold is more defensible than picking K by "
+        f"hand and is appropriate here because the trait is oligogenic "
+        f"(one dominant locus, p ≈ 1.3e-68).",
         "2. **MLP with class-weighted BCE.** A 2-layer MLP "
         f"(hidden={HP.hidden}, dropout={HP.dropout}) trained with "
         "`BCEWithLogitsLoss(pos_weight = n_neg / n_pos)`. The "
@@ -367,13 +381,15 @@ def main() -> int:
         "3. **PR-AUC for evaluation, not accuracy.** PR-AUC is the "
         "standard metric for rare-event tasks: it directly measures "
         "how well the model ranks positives above negatives.",
-        "4. **Compare against additional methods**:",
+        "4. **Compare against additional methods rerun on the current "
+        "52-SNP bundle**:",
         "   - **Majority** baseline (always predicts brown).",
         "   - **Logistic Regression** with `class_weight=balanced`.",
         "   - **Random Forest** (n=500, `balanced_subsample`).",
-        "   - **TabPFN** (Hollmann et al. 2023): a pre-trained "
-        "Transformer that does in-context learning on small tabular "
-        "tasks — no gradient updates on our data.",
+        "   - **MLP (tuned)**: the best MLP hyperparameters selected "
+        "by CV PR-AUC on trainval.",
+        "   - **TabPFN** (Hollmann et al. 2023): a pretrained "
+        "Transformer for in-context learning on tabular tasks.",
         "   - **TabICL** (Qu et al. 2025): a tabular foundation model "
         "with column-wise embeddings, row-wise interactions, and "
         "dataset-wise in-context learning.",
@@ -386,14 +402,8 @@ def main() -> int:
         f"stopping on validation PR-AUC (patience {HP.patience}). "
         f"5-fold stratified cross-validation on 80 % trainval, then "
         f"refit on all of trainval and score the held-out 20 % test set.",
-        "",
-        "We also include **MLP (tuned)** — a variant where the MLP "
-        "hyperparameters (hidden, n_layers, dropout, lr, weight_decay) "
-        "were selected by a 72-config grid search on CV-mean PR-AUC, "
-        "using ONLY trainval (the test set was held out). See "
-        "`experiments/eye/hp_tuning_mlp.md` for the full ranking. The "
-        "two MLP rows let us check whether the default config was "
-        "already a reasonable point in the grid.",
+        " Stale result files from previous feature-selection runs are "
+        "ignored by the report renderer.",
         "",
         "## CV results (mean ± std across 5 stratified folds)",
         "",
@@ -417,22 +427,13 @@ def main() -> int:
         "MLP would learn to predict the majority class. The weight "
         "(~24× for the positive class) keeps gradients on rare "
         "positives meaningful.",
-        "- GWAS-informed feature selection (`p < 1.15e-7`, Deane-Coe "
-        "Bonferroni) is what makes this 2,769-dog dataset tractable: "
-        "56 statistically significant SNPs beat throwing 213,245 noisy "
+        "- GWAS-informed feature selection (`p < 5e-8`, Deane-Coe "
+        "genome-wide significance) is what makes this 2,769-dog dataset tractable: "
+        f"{bundle['X'].shape[1]} statistically significant SNPs beat throwing 213,245 noisy "
         "SNPs at the model.",
-        "- Among the deep tabular methods, TabPFN, TabICL, and TabNet provide a "
-        "useful sanity check on the MLP — see the Test results table "
-        "for the head-to-head comparison.",
-        "- **MLP (tuned) vs MLP (default)**: the grid search picked a "
-        "slightly different config (1 hidden layer instead of 2, "
-        "lr=5e-4 instead of 1e-3). Its CV PR-AUC is marginally higher "
-        "(0.7474 vs 0.7374), but its test PR-AUC is actually lower "
-        "(0.656 vs 0.667). This is a textbook **CV–test gap**: when "
-        "the validation signal is noisy (only ~22 positives per fold), "
-        "the config that maximises CV does not necessarily generalise "
-        "best. We keep the default as the headline 'proposed method' "
-        "and report the tuned variant for transparency.",
+        "- Among the deep tabular methods rerun on the current bundle, "
+        "TabPFN, TabICL, and TabNet provide a useful sanity check on the MLP — "
+        "see the Test results table for the head-to-head comparison.",
         "",
         "## Figures",
         "",

@@ -4,9 +4,9 @@ Pipeline:
     1. Load phenotype CSV → keep dogs in the discovery panel with a known
        eye-color label (blue=1 / brown=0). Heterochromia is treated as
        blue (positive class) per the original paper.
-    2. Load GWAS results (.assoc.txt) → sort by p_wald → keep top-K SNPs.
-       This is the "GWAS-informed feature selection" step that justifies
-       using only K SNPs out of 213,245.
+    2. Load GWAS results (.assoc.txt) → sort by p_wald → keep SNPs that
+       pass the genome-wide significance threshold reported by Deane-Coe
+       et al. 2018 (P < 5e-8).
     3. Read genotype dosages for those K SNPs from the PLINK bed/bim/fam
        files (memory-mapped via pysnptools, no full load).
     4. Align rows: only keep dogs that appear both in genotype and
@@ -15,18 +15,18 @@ Pipeline:
        snp_chrom, snp_pos, p_wald.
 
 Usage:
-    python dog/src/data/preprocess_eye.py                # default p < 1.15e-7
+    python dog/src/data/preprocess_eye.py                # default p < 5e-8
     python dog/src/data/preprocess_eye.py --p 1e-5       # suggestive
     python dog/src/data/preprocess_eye.py --top_k 200    # legacy top-K mode
 
-Why p < 1.15e-7 instead of an arbitrary top-K?
-    1.15e-7 is the Bonferroni-corrected genome-wide threshold used in
-    the original Deane-Coe et al. 2018 paper on THIS dataset
-    (0.05 / ~430k markers after QC). Using the exact threshold from the
-    reference paper is more defensible than picking K by hand. It is
-    also appropriate here because the trait is oligogenic — Deane-Coe
-    et al. show one dominant locus on chr18/ALX4 (p ~ 1.3e-68), so a
-    small, statistically significant SNP set is sufficient.
+Why p < 5e-8 instead of an arbitrary top-K?
+    Deane-Coe et al. 2018 marks genome-wide significant associations at
+    P < 5e-8 in the paper figures/method text. Using the paper-reported
+    significance threshold is more defensible than picking K by hand.
+    It is also appropriate here because the trait is oligogenic:
+    Deane-Coe et al. show one dominant locus on chr18/ALX4
+    (p ~ 1.3e-68), so a small, statistically significant SNP set is
+    sufficient.
 """
 from __future__ import annotations
 
@@ -74,8 +74,8 @@ def select_snps(p_threshold: float | None, top_k: int | None) -> pd.DataFrame:
 
     Two modes:
       - p_threshold (default): keep SNPs with p_wald < threshold.
-        Recommended: 1.15e-7 (Bonferroni cutoff used by Deane-Coe
-        et al. 2018 on this dataset).
+        Recommended: 5e-8, the genome-wide significance threshold
+        reported by Deane-Coe et al. 2018.
       - top_k (legacy): keep the K smallest-p_wald SNPs regardless of
         statistical significance.
     """
@@ -145,9 +145,9 @@ def extract_genotypes(snp_df: pd.DataFrame, dog_ids_keep: list[str]) -> tuple[np
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--p", dest="p_threshold", type=float, default=1.15e-7,
+    parser.add_argument("--p", dest="p_threshold", type=float, default=5e-8,
                         help="Keep SNPs with p_wald < this "
-                             "(default 1.15e-7 = Bonferroni in Deane-Coe 2018)")
+                             "(default 5e-8 = Deane-Coe 2018 genome-wide significance)")
     parser.add_argument("--top_k", type=int, default=None,
                         help="Legacy: instead of --p, keep the top-K SNPs by p_wald")
     args = parser.parse_args()

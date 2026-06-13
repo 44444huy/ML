@@ -9,7 +9,7 @@ What is TabNet?
       - built-in feature importance (which SNPs the model attends to).
 
 Why try it here?
-    Our MLP and the classical baselines treat all 56 SNPs equally. TabNet
+    Our MLP and the classical baselines treat all 52 SNPs equally. TabNet
     can learn to focus on the chr18 / ALX4 SNPs and ignore weaker ones,
     which is conceptually a better fit for this oligogenic trait.
 

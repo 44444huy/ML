@@ -12,7 +12,7 @@ Why try it here?
     Two beginner-friendly properties matter for this project:
       1. Zero hyper-parameter tuning. Same default config for every task.
       2. It is a strong baseline on small tabular problems (n < ~10k).
-    Our dataset is exactly that: ~2,769 dogs × 56 SNPs, severely imbalanced.
+    Our dataset is exactly that: ~2,769 dogs × 52 SNPs, severely imbalanced.
 
 Imbalance handling:
     TabPFN does not expose a `pos_weight` knob. We apply two common
@@ -42,6 +42,8 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
+MODEL_CACHE_DIR = ROOT / "data" / "processed" / "model_cache"
+os.environ.setdefault("TABPFN_MODEL_CACHE_DIR", str(MODEL_CACHE_DIR / "tabpfn"))
 
 from data.splits import load_splits  # noqa: E402
 from evaluation.metrics import evaluate, aggregate_folds  # noqa: E402
