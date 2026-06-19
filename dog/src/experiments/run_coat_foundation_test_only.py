@@ -24,7 +24,7 @@ os.environ.setdefault("MKL_NUM_THREADS", "2")
 os.environ.setdefault("TABPFN_ALLOW_CPU_LARGE_DATASET", "1")
 
 import numpy as np
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, precision_recall_curve
 from sklearn.preprocessing import StandardScaler
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -45,7 +45,9 @@ def standardize(X_train: np.ndarray, X_other: np.ndarray) -> tuple[np.ndarray, n
 
 
 def best_f1_threshold(y_true: np.ndarray, prob: np.ndarray) -> float:
-    thresholds = np.unique(np.concatenate([[0.5], np.linspace(0.01, 0.99, 99)]))
+    _, _, thresholds = precision_recall_curve(y_true, prob)
+    if len(thresholds) == 0:
+        return 0.5
     best_t, best_f1 = 0.5, -1.0
     for threshold in thresholds:
         pred = (prob >= threshold).astype(int)

@@ -22,33 +22,34 @@ The hard parts:
    - **TabICL** (Qu et al. 2025): a tabular foundation model with column-wise embeddings, row-wise interactions, and dataset-wise in-context learning.
    - **TabNet** (Arik & Pfister 2021): an attention-based tabular model that learns which SNPs to focus on at each decision step.
 
-Hyperparameters (fixed): Adam lr=0.001, weight_decay=0.0001, batch_size=64, early stopping on validation PR-AUC (patience 25). 5-fold stratified cross-validation on 80 % trainval, then refit on all of trainval and score the held-out 20 % test set. Stale result files from previous feature-selection runs are ignored by the report renderer.
+Hyperparameters (fixed): Adam lr=0.001, weight_decay=0.0001, batch_size=64, early stopping on validation PR-AUC (patience 25). 5-fold stratified cross-validation on 80 % trainval, then refit on all of trainval and score the held-out 20 % test set.
+ Stale result files from previous feature-selection runs are ignored by the report renderer.
 
 ## CV results (mean ± std across 5 stratified folds)
 
 | method | PR-AUC | ROC-AUC | F1 |
 |---|---|---|---|
 | Majority | 0.0388 ± 0.0009 | 0.5000 ± 0.0000 | 0.0000 ± 0.0000 |
-| LR | 0.6565 ± 0.1031 | 0.9032 ± 0.0373 | 0.4592 ± 0.0294 |
-| RF | 0.6280 ± 0.1159 | 0.9154 ± 0.0278 | 0.5831 ± 0.1094 |
-| MLP | 0.7275 ± 0.1285 | 0.9209 ± 0.0324 | 0.5500 ± 0.0616 |
-| MLP (tuned) | 0.7420 ± 0.1145 | 0.9276 ± 0.0297 | 0.4869 ± 0.1174 |
+| LR | 0.6565 ± 0.1031 | 0.9032 ± 0.0373 | 0.6707 ± 0.1070 |
+| RF | 0.6280 ± 0.1159 | 0.9154 ± 0.0278 | 0.7165 ± 0.0784 |
+| MLP | 0.7275 ± 0.1285 | 0.9209 ± 0.0324 | 0.7644 ± 0.0916 |
+| MLP (tuned) | 0.7420 ± 0.1145 | 0.9276 ± 0.0297 | 0.7655 ± 0.0767 |
 | TabPFN | 0.6741 ± 0.1470 | 0.9212 ± 0.0350 | 0.7533 ± 0.0776 |
 | TabICL | 0.6931 ± 0.1354 | 0.9311 ± 0.0327 | 0.7537 ± 0.0757 |
-| TabNet | 0.5684 ± 0.1182 | 0.9445 ± 0.0259 | 0.4696 ± 0.1038 |
+| TabNet | 0.5684 ± 0.1182 | 0.9445 ± 0.0259 | 0.6091 ± 0.0709 |
 
 ## Test results (refit on full train+val)
 
 | method | PR-AUC | ROC-AUC | F1 | precision | recall |
 |---|---|---|---|---|---|
 | Majority | 0.0397 | 0.5000 | 0.0000 | 0.0000 | 0.0000 |
-| LR | 0.6247 | 0.8542 | 0.4545 | 0.3409 | 0.6818 |
-| RF | 0.6284 | 0.8534 | 0.5556 | 0.7143 | 0.4545 |
-| MLP | 0.6407 | 0.8683 | 0.5357 | 0.4412 | 0.6818 |
-| MLP (tuned) | 0.6698 | 0.8906 | 0.6522 | 0.6250 | 0.6818 |
+| LR | 0.6247 | 0.8542 | 0.4286 | 1.0000 | 0.2727 |
+| RF | 0.6284 | 0.8534 | 0.6667 | 0.7647 | 0.5909 |
+| MLP | 0.6407 | 0.8683 | 0.7000 | 0.7778 | 0.6364 |
+| MLP (tuned) | 0.6698 | 0.8906 | 0.7000 | 0.7778 | 0.6364 |
 | TabPFN | 0.6003 | 0.8357 | 0.6667 | 0.7647 | 0.5909 |
 | TabICL | 0.6728 | 0.8762 | 0.7273 | 0.7273 | 0.7273 |
-| TabNet | 0.5487 | 0.8166 | 0.2615 | 0.1574 | 0.7727 |
+| TabNet | 0.5487 | 0.8166 | 0.5455 | 0.4545 | 0.6818 |
 
 ## Discussion
 

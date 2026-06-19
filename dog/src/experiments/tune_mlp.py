@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from data.splits import load_splits  # noqa: E402
-from evaluation.metrics import aggregate_folds, evaluate  # noqa: E402
+from evaluation.metrics import aggregate_folds, best_f1_threshold, evaluate  # noqa: E402
 from models.mlp import MLPBinary  # noqa: E402
 from train.train_eye import SEED, predict, seed_all, standardize  # noqa: E402
 
@@ -125,8 +125,12 @@ def cv_score(X, y, splits, device, hp: dict) -> dict:
         tr, va = fold["train"], fold["valid"]
         X_tr, X_va = standardize(X[tr], X[va])
         model = train_one(X_tr, y[tr], X_va, y[va], device, **hp)
-        prob, pred = predict(model, X_va, device)
-        fold_results.append(evaluate(y[va], pred, prob))
+        prob = predict(model, X_va, device)
+        threshold = best_f1_threshold(y[va], prob)
+        pred = (prob >= threshold).astype(int)
+        res = evaluate(y[va], pred, prob)
+        res["threshold"] = float(threshold)
+        fold_results.append(res)
     return aggregate_folds(fold_results)
 
 
@@ -144,8 +148,13 @@ def refit_and_test(X, y, splits, device, hp: dict) -> dict:
     model = train_one(X_tv[idx_tr], y[tv][idx_tr],
                       X_tv[idx_va], y[tv][idx_va],
                       device, **hp)
-    prob_te, pred_te = predict(model, X_te, device)
-    return evaluate(y[te], pred_te, prob_te)
+    prob_va = predict(model, X_tv[idx_va], device)
+    threshold = best_f1_threshold(y[tv][idx_va], prob_va)
+    prob_te = predict(model, X_te, device)
+    pred_te = (prob_te >= threshold).astype(int)
+    test_res = evaluate(y[te], pred_te, prob_te)
+    test_res["threshold"] = float(threshold)
+    return test_res
 
 
 def main() -> int:
@@ -231,8 +240,12 @@ def main() -> int:
         tr, va = fold["train"], fold["valid"]
         X_tr, X_va = standardize(X[tr], X[va])
         model = train_one(X_tr, y[tr], X_va, y[va], device, **best_hp)
-        prob, pred = predict(model, X_va, device)
-        fold_results_for_best.append(evaluate(y[va], pred, prob))
+        prob = predict(model, X_va, device)
+        threshold = best_f1_threshold(y[va], prob)
+        pred = (prob >= threshold).astype(int)
+        res = evaluate(y[va], pred, prob)
+        res["threshold"] = float(threshold)
+        fold_results_for_best.append(res)
     OUT_BEST.write_text(json.dumps({
         "cv": {"per_fold": fold_results_for_best,
                "cv_mean": best_cv_only},

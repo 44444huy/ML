@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from data.splits import load_splits  # noqa: E402
-from evaluation.metrics import evaluate, aggregate_folds  # noqa: E402
+from evaluation.metrics import aggregate_folds, best_f1_threshold, evaluate  # noqa: E402
 
 warnings.filterwarnings("ignore")
 
@@ -94,12 +94,14 @@ def run(X: np.ndarray, y: np.ndarray, splits: dict, device: str) -> dict:
         tr, va = fold["train"], fold["valid"]
         X_tr, X_va = standardize(X[tr], X[va])
         prob = fit_predict(X_tr, y[tr], X_va, y[va], X_va, device)
-        pred = (prob >= 0.5).astype(int)
+        threshold = best_f1_threshold(y[va], prob)
+        pred = (prob >= threshold).astype(int)
         res = evaluate(y[va], pred, prob)
         res["fold"] = i
+        res["threshold"] = float(threshold)
         fold_results.append(res)
         print(f"  fold {i}: PR-AUC={res['pr_auc']:.4f} ROC={res['roc_auc']:.4f} "
-              f"F1={res['f1']:.3f}")
+              f"F1={res['f1']:.3f} (t={threshold:.2f})")
 
     cv_mean = aggregate_folds(fold_results)
 
@@ -111,15 +113,22 @@ def run(X: np.ndarray, y: np.ndarray, splits: dict, device: str) -> dict:
     perm = rng.permutation(len(tv))
     cut = int(0.9 * len(tv))
     idx_tr, idx_va = perm[:cut], perm[cut:]
+    prob_va = fit_predict(
+        X_tv[idx_tr], y[tv][idx_tr],
+        X_tv[idx_va], y[tv][idx_va],
+        X_tv[idx_va], device,
+    )
+    threshold = best_f1_threshold(y[tv][idx_va], prob_va)
     prob_te = fit_predict(
         X_tv[idx_tr], y[tv][idx_tr],
         X_tv[idx_va], y[tv][idx_va],
         X_te, device,
     )
-    pred_te = (prob_te >= 0.5).astype(int)
+    pred_te = (prob_te >= threshold).astype(int)
     test_res = evaluate(y[te], pred_te, prob_te)
+    test_res["threshold"] = float(threshold)
     print(f"  TEST  PR-AUC={test_res['pr_auc']:.4f} ROC={test_res['roc_auc']:.4f} "
-          f"F1={test_res['f1']:.3f}")
+          f"F1={test_res['f1']:.3f} (t={threshold:.2f})")
 
     return {"cv": {"per_fold": fold_results, "cv_mean": cv_mean}, "test": test_res}
 

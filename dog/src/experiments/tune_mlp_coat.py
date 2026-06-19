@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from data.splits_coat import load_splits  # noqa: E402
-from evaluation.metrics import aggregate_folds, evaluate  # noqa: E402
+from evaluation.metrics import aggregate_folds, best_f1_threshold, evaluate  # noqa: E402
 from models.mlp import MLPBinary  # noqa: E402
 from train.train_coat import exp_dir, npz_path, seed_all, standardize  # noqa: E402
 
@@ -109,12 +109,10 @@ def train_one(X_tr, y_tr, X_va, y_va, device, hp: dict) -> MLPBinary:
 
 
 @torch.no_grad()
-def predict(model, X, device) -> tuple[np.ndarray, np.ndarray]:
+def predict(model, X, device) -> np.ndarray:
     model.eval()
     X_t = torch.tensor(X, dtype=torch.float32, device=device)
-    prob = torch.sigmoid(model(X_t)).cpu().numpy()
-    pred = (prob >= 0.5).astype(int)
-    return prob, pred
+    return torch.sigmoid(model(X_t)).cpu().numpy()
 
 
 def cv_score(X, y, splits, device, hp: dict) -> tuple[dict, list[dict]]:
@@ -123,10 +121,12 @@ def cv_score(X, y, splits, device, hp: dict) -> tuple[dict, list[dict]]:
         tr, va = fold["train"], fold["valid"]
         X_tr, X_va = standardize(X[tr], X[va])
         model = train_one(X_tr, y[tr], X_va, y[va], device, hp)
-        prob, pred = predict(model, X_va, device)
+        prob = predict(model, X_va, device)
+        threshold = best_f1_threshold(y[va], prob)
+        pred = (prob >= threshold).astype(int)
         res = evaluate(y[va], pred, prob)
         res["fold"] = i
-        res["threshold"] = 0.5
+        res["threshold"] = float(threshold)
         fold_results.append(res)
     return aggregate_folds(fold_results), fold_results
 
@@ -142,9 +142,12 @@ def refit_and_test(X, y, splits, device, hp: dict) -> dict:
     idx_tr, idx_va = perm[:cut], perm[cut:]
 
     model = train_one(X_tv[idx_tr], y_tv[idx_tr], X_tv[idx_va], y_tv[idx_va], device, hp)
-    prob_te, pred_te = predict(model, X_te, device)
+    prob_va = predict(model, X_tv[idx_va], device)
+    threshold = best_f1_threshold(y_tv[idx_va], prob_va)
+    prob_te = predict(model, X_te, device)
+    pred_te = (prob_te >= threshold).astype(int)
     test_res = evaluate(y[te], pred_te, prob_te)
-    test_res["threshold"] = 0.5
+    test_res["threshold"] = float(threshold)
     return test_res
 
 

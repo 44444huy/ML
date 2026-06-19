@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from data.splits_coat import load_splits  # noqa: E402
-from evaluation.metrics import aggregate_folds, evaluate  # noqa: E402
+from evaluation.metrics import aggregate_folds, best_f1_threshold, evaluate  # noqa: E402
 from models.mlp import MLPBinary  # noqa: E402
 
 PROCESSED_DIR = ROOT / "data" / "processed" / "coat"
@@ -95,21 +95,6 @@ def seed_all(seed: int = SEED) -> None:
 def standardize(X_train: np.ndarray, X_other: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     sc = StandardScaler().fit(X_train)
     return sc.transform(X_train).astype(np.float32), sc.transform(X_other).astype(np.float32)
-
-
-def best_f1_threshold(y_true: np.ndarray, prob: np.ndarray) -> float:
-    from sklearn.metrics import f1_score
-
-    thresholds = np.unique(np.concatenate([[0.5], np.linspace(0.01, 0.99, 99)]))
-    best_t, best_f1 = 0.5, -1.0
-    for t in thresholds:
-        pred = (prob >= t).astype(int)
-        if pred.sum() == 0:
-            continue
-        f = f1_score(y_true, pred, zero_division=0)
-        if f > best_f1:
-            best_f1, best_t = f, t
-    return float(best_t)
 
 
 def train_mlp_one(X_tr, y_tr, X_va, y_va, device: torch.device) -> nn.Module:
@@ -185,7 +170,8 @@ def fit_predict(model_name: str, X_tr, y_tr, X_va, y_va, X_te, args, device) -> 
             random_state=SEED,
             solver="liblinear",
         ).fit(X_tr, y_tr)
-        return model.predict_proba(X_te)[:, 1], 0.5
+        threshold = best_f1_threshold(y_va, model.predict_proba(X_va)[:, 1])
+        return model.predict_proba(X_te)[:, 1], threshold
 
     if model_name == "RF":
         model = RandomForestClassifier(
@@ -194,12 +180,14 @@ def fit_predict(model_name: str, X_tr, y_tr, X_va, y_va, X_te, args, device) -> 
             n_jobs=-1,
             random_state=SEED,
         ).fit(X_tr, y_tr)
-        return model.predict_proba(X_te)[:, 1], 0.5
+        threshold = best_f1_threshold(y_va, model.predict_proba(X_va)[:, 1])
+        return model.predict_proba(X_te)[:, 1], threshold
 
     if model_name == "MLP":
         model = train_mlp_one(X_tr, y_tr, X_va, y_va, device)
+        threshold = best_f1_threshold(y_va, predict_mlp(model, X_va, device))
         prob = predict_mlp(model, X_te, device)
-        return prob, 0.5
+        return prob, threshold
 
     if model_name == "TabPFN":
         from tabpfn import TabPFNClassifier
@@ -269,7 +257,8 @@ def fit_predict(model_name: str, X_tr, y_tr, X_va, y_va, X_te, args, device) -> 
             virtual_batch_size=64,
             weights={0: 1.0, 1: float(n_neg) / max(n_pos, 1)},
         )
-        return clf.predict_proba(X_te)[:, 1], 0.5
+        threshold = best_f1_threshold(y_va, clf.predict_proba(X_va)[:, 1])
+        return clf.predict_proba(X_te)[:, 1], threshold
 
     raise ValueError(f"Unknown model: {model_name}")
 

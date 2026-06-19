@@ -60,10 +60,12 @@ def standardize(X_train: np.ndarray, X_other: np.ndarray) -> tuple[np.ndarray, n
 
 
 def best_f1_threshold(y_true: np.ndarray, prob: np.ndarray) -> float:
-    """Pick the probability threshold that maximizes F1 on validation."""
-    from sklearn.metrics import f1_score
+    """Pick the PR-curve probability threshold that maximizes F1."""
+    from sklearn.metrics import f1_score, precision_recall_curve
 
-    thresholds = np.unique(np.concatenate([[0.5], np.linspace(0.01, 0.99, 99)]))
+    _, _, thresholds = precision_recall_curve(y_true, prob)
+    if len(thresholds) == 0:
+        return 0.5
     best_t, best_f1 = 0.5, -1.0
     for t in thresholds:
         pred = (prob >= t).astype(int)

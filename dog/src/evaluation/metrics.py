@@ -7,7 +7,7 @@ report:
     PR-AUC    — area under the precision-recall curve, the right
                  ranking metric when positives are rare.
     ROC-AUC   — for completeness / comparison with paper.
-    F1 / precision / recall — at the default 0.5 threshold.
+    F1 / precision / recall — at the supplied decision threshold.
     confusion_matrix         — for the report tables.
 """
 from __future__ import annotations
@@ -17,6 +17,7 @@ from sklearn.metrics import (
     average_precision_score,
     confusion_matrix,
     f1_score,
+    precision_recall_curve,
     precision_score,
     recall_score,
     roc_auc_score,
@@ -28,7 +29,7 @@ def evaluate(y_true: np.ndarray, y_pred: np.ndarray, y_prob: np.ndarray) -> dict
 
     Args:
         y_true : (n,) int  in {0,1}
-        y_pred : (n,) int  in {0,1}, hard labels at threshold 0.5
+        y_pred : (n,) int  in {0,1}, hard labels after thresholding
         y_prob : (n,) float, P(blue=1)
     """
     try:
@@ -52,6 +53,22 @@ def evaluate(y_true: np.ndarray, y_pred: np.ndarray, y_prob: np.ndarray) -> dict
     }
 
 
+def best_f1_threshold(y_true: np.ndarray, y_prob: np.ndarray) -> float:
+    """Pick the PR-curve probability threshold that maximizes F1."""
+    _, _, thresholds = precision_recall_curve(y_true, y_prob)
+    if len(thresholds) == 0:
+        return 0.5
+    best_t, best_f1 = 0.5, -1.0
+    for threshold in thresholds:
+        y_pred = (y_prob >= threshold).astype(int)
+        if y_pred.sum() == 0:
+            continue
+        score = f1_score(y_true, y_pred, zero_division=0)
+        if score > best_f1:
+            best_t, best_f1 = float(threshold), float(score)
+    return best_t
+
+
 def aggregate_folds(fold_results: list[dict]) -> dict:
     """Mean ± std across folds for scalar metrics."""
     keys = ["pr_auc", "roc_auc", "f1", "precision", "recall"]
@@ -60,5 +77,3 @@ def aggregate_folds(fold_results: list[dict]) -> dict:
         vals = np.asarray([r[k] for r in fold_results], dtype=float)
         out[k] = {"mean": float(np.nanmean(vals)), "std": float(np.nanstd(vals))}
     return out
-
-
